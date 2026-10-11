@@ -1,0 +1,5 @@
+@font-face { font-family: 'Titillium Web'; font-style: italic; font-weight: 700; font-display: swap; src: url('fonts/titillium-700-italic.woff2') format('woff2'); }
+@font-face { font-family: 'Titillium Web'; font-style: normal; font-weight: 400; font-display: swap; src: url('fonts/titillium-400-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Titillium Web'; font-style: normal; font-weight: 600; font-display: swap; src: url('fonts/titillium-600-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Titillium Web'; font-style: normal; font-weight: 700; font-display: swap; src: url('fonts/titillium-700-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Titillium Web'; font-style: normal; font-weight: 900; font-display: swap; src: url('fonts/titillium-900-normal.woff2') format('woff2'); }

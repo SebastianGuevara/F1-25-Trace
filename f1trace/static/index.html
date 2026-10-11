@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TRACE</title>
+<link rel="stylesheet" href="titillium.css">
+<link rel="stylesheet" href="style.css">
+<script>
+if (location.protocol === "file:") {
+  document.addEventListener("DOMContentLoaded", function () {
+    document.body.innerHTML =
+      '<div style="font:16px/1.6 sans-serif;color:#dbe2ee;background:#0b0e13;' +
+      'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:40px">' +
+      "<div><h2>This page can't run as a file</h2>" +
+      "You opened index.html directly. Instead:<br><br>" +
+      "1. Run <code style='color:#22d3ee'>python3 -m f1trace</code> in the project folder<br>" +
+      "2. Open <a href='http://localhost:8020' style='color:#22d3ee'>http://localhost:8020</a> in your browser</div></div>";
+  });
+}
+</script>
+</head>
+<body>
+<header>
+  <div class="brand" id="brand"><b>F1</b><span>TRACE</span></div>
+  <div id="status-chip" class="chip idle">IDLE</div>
+  <div id="pace-chip" class="chip live" style="display:none"
+       title="a Time Trial ghost is on track — its pace (lap clock vs distance, sector times) is being captured as a reference">PACE</div>
+  <div id="status-detail"></div>
+  <div class="spacer"></div>
+  <select id="track-select" title="track — all laps ever recorded on it, from every session"></select>
+</header>
+
+<div id="layout">
+  <aside id="sidebar">
+    <div id="side-rail" title="expand the lap list">
+      <span class="rail-arrow">»</span>
+      <b>LAPS</b>
+    </div>
+    <div class="side-head">
+      <span>LAPS</span>
+      <span class="hint">click = view · VS = compare against</span>
+      <button id="side-toggle" title="collapse the lap list">«</button>
+    </div>
+    <div id="lap-controls">
+      <div class="seg small" id="sort-seg" title="lap ordering">
+        <button data-sort="recent" class="on">RECENT</button>
+        <button data-sort="fastest">FASTEST</button>
+      </div>
+      <div class="seg small" id="role-seg" title="whose laps to show — none active = everyone">
+        <button data-role="player">YOU</button>
+        <button data-role="ghost">GHOSTS</button>
+      </div>
+      <div class="seg small" id="asst-seg" title="filter by driving assists — none active = all laps (laps recorded before assist capture only match when nothing is selected)">
+        <button data-asst="on">ASSISTS</button>
+        <button data-asst="off">NO ASSISTS</button>
+      </div>
+      <button id="inv-toggle" class="toggle" title="hide laps the game flagged invalid (corner cuts etc.)">HIDE INV</button>
+      <button id="fold-btn" class="toggle" title="collapse / expand all sessions (click a session header for just that one)">FOLD</button>
+    </div>
+    <div id="lap-list"></div>
+    <div id="list-foot">
+      <button id="inv-del" title="delete every invalid lap from the database — all tracks, all sessions">✕ delete all invalid laps</button>
+    </div>
+  </aside>
+
+  <main id="main">
+    <div id="stage">
+      <canvas id="map"></canvas>
+
+      <div id="hud">
+        <div class="card-tag" id="hud-tag" title="collapse / expand this card">TELEMETRY ▾</div>
+        <span id="hud-drag" title="hold anywhere on this card and drag to move it">✥ DRAG</span>
+        <button id="hud-steer-btn" title="show / hide the steering section">STEER</button>
+        <svg id="halo" viewBox="0 0 310 400">
+          <!-- steering section (hideable) -->
+          <g id="steer-block">
+          <g transform="translate(155,84)">
+            <g id="wheel-rot">
+              <!-- grips: curved handles standing off the plate -->
+              <path class="wheel-grip" d="M -50 -24 Q -62 3 -48 30"/>
+              <path class="wheel-grip" d="M 50 -24 Q 62 3 48 30"/>
+              <g class="wheel-gripline">
+                <line x1="-59" y1="-4" x2="-52" y2="-4"/>
+                <line x1="-59.5" y1="4" x2="-52.5" y2="4"/>
+                <line x1="-58" y1="12" x2="-51" y2="12"/>
+                <line x1="52" y1="-4" x2="59" y2="-4"/>
+                <line x1="52.5" y1="4" x2="59.5" y2="4"/>
+                <line x1="51" y1="12" x2="58" y2="12"/>
+              </g>
+              <!-- connector arms; the openings between grip, arms and plate
+                   are the thumb cut-outs -->
+              <g class="wheel-arm">
+                <line x1="-46" y1="-23" x2="-30" y2="-24"/>
+                <line x1="46" y1="-23" x2="30" y2="-24"/>
+                <line x1="-45" y1="26" x2="-22" y2="21"/>
+                <line x1="45" y1="26" x2="22" y2="21"/>
+              </g>
+              <!-- faceplate -->
+              <path class="wheel-plate"
+                d="M -36 -28 L 36 -28 L 32 12 L 15 30 L -15 30 L -32 12 Z"/>
+              <!-- wheel LED row -->
+              <g class="wheel-led">
+                <circle cx="-15" cy="-23" r="1.7"/><circle cx="-9" cy="-23" r="1.7"/>
+                <circle cx="-3" cy="-23" r="1.7"/><circle cx="3" cy="-23" r="1.7"/>
+                <circle cx="9" cy="-23" r="1.7"/><circle cx="15" cy="-23" r="1.7"/>
+              </g>
+              <!-- screen -->
+              <rect x="-22" y="-17" width="44" height="26" rx="3" class="wheel-screen"/>
+              <rect x="-17" y="-11" width="15" height="3.2" rx="1.5" fill="#22d3ee" opacity=".85"/>
+              <rect x="-17" y="-5" width="24" height="2.4" rx="1.2" fill="#4a5568"/>
+              <rect x="-17" y="0.5" width="19" height="2.4" rx="1.2" fill="#4a5568"/>
+              <!-- buttons -->
+              <circle cx="-28" cy="-14" r="2.8" fill="#e10600"/>
+              <circle cx="-29" cy="-3" r="2.8" fill="#3b82f6"/>
+              <circle cx="28" cy="-14" r="2.8" fill="#fbbf24"/>
+              <circle cx="29" cy="-3" r="2.8" fill="#34d399"/>
+              <!-- rotaries -->
+              <g class="wheel-rotary">
+                <circle cx="-15" cy="20" r="5.5"/><line x1="-15" y1="16" x2="-15" y2="20"/>
+                <circle cx="0" cy="23" r="6.5"/><line x1="0" y1="18" x2="0" y2="23"/>
+                <circle cx="15" cy="20" r="5.5"/><line x1="15" y1="16" x2="15" y2="20"/>
+              </g>
+              <!-- top-centre marker -->
+              <rect x="-5" y="-33" width="10" height="6" rx="2" class="wheel-marker"/>
+            </g>
+          </g>
+          <text id="steer-val" x="155" y="158" class="steer-val">0</text>
+          <text x="155" y="174" class="lbl">STEERING</text>
+          </g>
+
+          <!-- the original halo cluster, stacked below the wheel -->
+          <g id="cluster-block">
+          <!-- rev lights (built in initHalo) -->
+          <g id="rev-strip"></g>
+
+          <!-- throttle / brake arcs around the speed cluster -->
+          <g id="arc-ticks"></g>
+          <path id="thr-bg"  class="arc-bg" d=""/>
+          <path id="thr-arc" class="arc thr" d=""/>
+          <path id="brk-bg"  class="arc-bg" d=""/>
+          <path id="brk-arc" class="arc brk" d=""/>
+          <text x="76" y="387" class="lbl">THROTTLE</text>
+          <text x="234" y="387" class="lbl">BRAKE</text>
+
+          <!-- speed cluster: gear on top, big speed centred -->
+          <rect x="136" y="229" width="38" height="27" rx="6" class="gear-badge"/>
+          <text id="hud-gear" x="155" y="249" class="gear">N</text>
+          <!-- slant comes from skewX, not the italic font face: geometric
+               transforms are rasterized outline-level, so the last digit's
+               overhang can never be clipped to a glyph box -->
+          <text id="hud-speed" x="0" y="0" class="speed"
+                transform="translate(155,321) skewX(-10)">0</text>
+          <text x="155" y="341" class="unit">KM/H</text>
+
+          <!-- 2026: overtake/boost + active aero X (straight) / Z (corner) -->
+          <rect id="boost-pill" x="88" y="359" rx="8" width="62" height="17" class="pill"/>
+          <text id="boost-txt" x="119" y="371" class="pill-txt">BOOST</text>
+          <rect id="aero-pill" x="160" y="359" rx="8" width="62" height="17" class="pill"/>
+          <text id="aero-txt" x="191" y="371" class="pill-txt">AERO</text>
+          </g>
+        </svg>
+        <div id="hud-delta" class="hud-delta"></div>
+      </div>
+
+      <div id="map-legend"></div>
+
+      <div id="map-toolbar">
+        <div class="seg" id="mode-seg">
+          <button data-mode="speed" class="on">SPEED</button>
+          <button data-mode="gap" disabled>GAP</button>
+        </div>
+        <div class="seg">
+          <button id="setup-btn" title="car setup + assists of the viewed lap">SETUP</button>
+          <button id="export-btn" title="save the viewed lap as a .trace file — send it to someone, they drop it onto their TRACE window to compare">EXPORT</button>
+        </div>
+        <div id="color-legend">
+          <span id="leg-title"></span>
+          <span id="leg-lo"></span><div id="leg-bar"></div><span id="leg-hi"></span>
+        </div>
+        <div id="zoom-chip" style="display:none">
+          <span id="zoom-txt"></span>
+          <button id="zoom-reset" title="or double-click the map">RESET</button>
+        </div>
+      </div>
+
+      <div id="sector-card"></div>
+      <div id="setup-card" style="display:none"></div>
+
+      <div id="empty-hint">
+        <h2>No lap selected</h2>
+        <p>Drive some laps with the game broadcasting UDP telemetry to this
+        machine, then pick a lap on the left.<br>
+        Mark any other lap of the same track as <b>VS</b> to compare — even
+        from a different day: ghost car, overlay traces and a time-delta graph
+        showing exactly where you gain or lose.<br>
+        Scroll on the map — or on the charts — to zoom into a corner;
+        the two stay in sync.<br>
+        Got a <b>.trace</b> file from someone else? Drop it anywhere on this
+        window to import their lap.</p>
+      </div>
+    </div>
+
+    <div id="transport">
+      <button id="btn-play" title="space">▶</button>
+      <select id="speed-select">
+        <option value="0.25">0.25×</option>
+        <option value="0.5">0.5×</option>
+        <option value="1" selected>1×</option>
+        <option value="2">2×</option>
+        <option value="4">4×</option>
+      </select>
+      <input id="scrub" type="range" min="0" max="1000" value="0">
+      <div id="time-display">0:00.000</div>
+    </div>
+
+    <div id="splitter" title="drag to resize the charts"></div>
+    <div id="charts">
+      <div class="chart-row tall"><label>SPEED</label><canvas id="ch-speed" class="chart"></canvas>
+        <span class="cv"><span id="cvA-speed" class="vA"></span><span id="cvB-speed" class="vB"></span></span></div>
+      <div class="chart-row"><label>THROTTLE</label><canvas id="ch-thr" class="chart"></canvas>
+        <span class="cv"><span id="cvA-thr" class="vA"></span><span id="cvB-thr" class="vB"></span></span></div>
+      <div class="chart-row"><label>BRAKE</label><canvas id="ch-brk" class="chart"></canvas>
+        <span class="cv"><span id="cvA-brk" class="vA"></span><span id="cvB-brk" class="vB"></span></span></div>
+      <div class="chart-row"><label>STEER</label><canvas id="ch-steer" class="chart"></canvas>
+        <span class="cv"><span id="cvA-steer" class="vA"></span><span id="cvB-steer" class="vB"></span></span></div>
+      <div class="chart-row"><label>GEAR</label><canvas id="ch-gear" class="chart"></canvas>
+        <span class="cv"><span id="cvA-gear" class="vA"></span><span id="cvB-gear" class="vB"></span></span></div>
+      <div class="chart-row"><label>ERS MODE</label><canvas id="ch-ers" class="chart"></canvas>
+        <span class="cv"><span id="cvA-ers" class="vA"></span><span id="cvB-ers" class="vB"></span></span></div>
+      <div class="chart-row" id="delta-row" style="display:none">
+        <label>DELTA</label><canvas id="ch-delta" class="chart"></canvas>
+        <span class="cv" id="cv-delta"></span></div>
+    </div>
+
+  </main>
+</div>
+
+<div id="drop-veil" style="display:none"><div>DROP TO IMPORT LAP</div></div>
+
+<script src="app.js"></script>
+</body>
+</html>
