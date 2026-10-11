@@ -139,6 +139,42 @@ header {
 }
 .toggle:hover { border-color: var(--dim); }
 .toggle.on { background: #123a44; border-color: var(--accent); color: var(--accent); }
+.driver-filter-sel {
+  background: var(--card); border: 1px solid var(--line); color: var(--accent);
+  font-family: inherit; font-size: 9px; font-weight: 700; font-style: italic;
+  letter-spacing: .5px; border-radius: 7px; padding: 4px 6px; cursor: pointer;
+  max-width: 140px; text-overflow: ellipsis; outline: none;
+}
+.driver-filter-sel:focus { border-color: var(--accent); }
+.driver-leaderboard {
+  border-bottom: 1px solid var(--line); background: rgba(18, 22, 32, 0.7);
+  padding: 6px 10px; font-size: 11px;
+}
+.dl-head {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 9px; font-weight: 800; letter-spacing: 1px; color: var(--dim);
+  margin-bottom: 5px; text-transform: uppercase;
+}
+.dl-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 3px 6px; border-radius: 4px; cursor: pointer; font-size: 11px;
+}
+.dl-row:hover { background: var(--panel2); }
+.dl-left { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.dl-pos { font-size: 10px; font-weight: 800; color: var(--dim); width: 14px; text-align: right; }
+.dl-name { font-weight: 700; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dl-row.rec .dl-name { color: #d8b4fe; }
+.dl-right { display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+.dl-time { font-weight: 700; color: var(--text); }
+.dl-gap { font-size: 10px; color: var(--dim); font-weight: 600; width: 44px; text-align: right; }
+.lap-row .pb {
+  color: var(--green); font-size: 9px; font-weight: 800; letter-spacing: 1px;
+  margin-left: 3px;
+}
+.lap-row .rec {
+  color: #c084fc; font-size: 9px; font-weight: 800; letter-spacing: 1px;
+  margin-left: 3px; text-shadow: 0 0 6px rgba(192, 132, 252, 0.4);
+}
 #lap-list { overflow-y: auto; flex: 1; }
 #list-foot {
   flex: none; border-top: 1px solid var(--line); padding: 5px 12px;
@@ -184,10 +220,6 @@ header {
 .lap-sub { font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; }
 .driver-tag { color: var(--accent); font-weight: 700; letter-spacing: 0.3px; }
 .lap-row .inv { color: var(--red); font-size: 10px; font-weight: 700; }
-.lap-row .pb {
-  color: var(--green); font-size: 9px; font-weight: 800; letter-spacing: 1px;
-  margin-left: 3px;
-}
 .refbtn {
   background: none; border: 1px solid #333947; color: #566075;
   font-family: inherit; font-size: 10px; font-weight: 800; font-style: italic;

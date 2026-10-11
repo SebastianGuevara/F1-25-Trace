@@ -55,9 +55,13 @@ if (location.protocol === "file:") {
         <button data-asst="on">ASSISTS</button>
         <button data-asst="off">NO ASSISTS</button>
       </div>
+      <select id="driver-select" class="driver-filter-sel" title="filter laps by driver">
+        <option value="all">ALL DRIVERS</option>
+      </select>
       <button id="inv-toggle" class="toggle" title="hide laps the game flagged invalid (corner cuts etc.)">HIDE INV</button>
       <button id="fold-btn" class="toggle" title="collapse / expand all sessions (click a session header for just that one)">FOLD</button>
     </div>
+    <div id="driver-leaderboard" class="driver-leaderboard" style="display:none"></div>
     <div id="lap-list"></div>
     <div id="list-foot">
       <button id="inv-del" title="delete every invalid lap from the database — all tracks, all sessions">✕ delete all invalid laps</button>

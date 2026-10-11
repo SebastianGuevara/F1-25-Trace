@@ -18,6 +18,7 @@ const state = {
   viewD: null,       // [d0, d1] focused distance range (map zoom -> charts)
   sort: "recent",    // lap list ordering: recent | fastest
   roleFilter: "all", // all | player | ghost
+  driverFilter: "all", // all | <driver_name>
   assistFilter: "all", // all | on | off
   hideInvalid: false,
   setupOpen: false,  // setup/assists panel visible
@@ -817,6 +818,7 @@ async function loadTracks(keepSelection) {
 async function selectTrack(id) {
   state.trackId = id;
   state.laps = await api(`api/tracks/${id}/laps`);
+  updateDriverFilterOptions();
   renderLapList();
 }
 
@@ -847,12 +849,89 @@ function assistsOn(a) {
             a.brake_assist || a.steer_assist);
 }
 
+function driverLabel(lap) {
+  return lap.driver_name || (lap.car_role === "player" ? "You" : lap.car_role);
+}
+
+function updateDriverFilterOptions() {
+  const sel = $("driver-select");
+  if (!sel) return;
+  const current = state.driverFilter;
+  const drivers = new Set();
+  for (const l of state.laps) {
+    if (l.driver_name) drivers.add(l.driver_name);
+  }
+  const sorted = Array.from(drivers).sort((a, b) => a.localeCompare(b));
+  sel.innerHTML = '<option value="all">ALL DRIVERS</option>';
+  for (const d of sorted) {
+    const opt = document.createElement("option");
+    opt.value = d;
+    opt.textContent = d.toUpperCase();
+    sel.appendChild(opt);
+  }
+  if (current !== "all" && drivers.has(current)) {
+    sel.value = current;
+  } else {
+    state.driverFilter = "all";
+    sel.value = "all";
+  }
+}
+
+function renderDriverLeaderboard(bestOverallId, pbMap) {
+  const board = $("driver-leaderboard");
+  if (!board) return;
+  // Collect fastest valid lap per driver
+  const map = new Map();
+  for (const l of state.laps) {
+    if (!l.valid || !l.lap_time_ms) continue;
+    const name = l.driver_name || (l.car_role === "player" ? "You" : null);
+    if (!name) continue;
+    if (!map.has(name) || l.lap_time_ms < map.get(name).lap_time_ms) {
+      map.set(name, l);
+    }
+  }
+  const list = Array.from(map.values()).sort((a, b) => a.lap_time_ms - b.lap_time_ms);
+  if (list.length < 2) {
+    board.style.display = "none";
+    board.innerHTML = "";
+    return;
+  }
+  board.style.display = "";
+  const baseMs = list[0].lap_time_ms;
+  let html = '<div class="dl-head"><span>Drivers\' Bests</span><span>Fastest</span></div>';
+  list.forEach((l, idx) => {
+    const isRecord = idx === 0;
+    const name = l.driver_name || "You";
+    const gapStr = idx > 0 ? `+${((l.lap_time_ms - baseMs) / 1000).toFixed(3)}s` : "RECORD";
+    html += `
+      <div class="dl-row ${isRecord ? "rec" : ""}" data-lap-id="${l.id}" title="Click to view ${escapeHtml(name)}'s best lap">
+        <div class="dl-left">
+          <span class="dl-pos">${idx + 1}</span>
+          <span class="dl-name">${escapeHtml(name)}</span>
+        </div>
+        <div class="dl-right">
+          <span class="dl-time">${fmtTime(l.lap_time_ms, 1)}</span>
+          <span class="dl-gap" style="${isRecord ? 'color:#c084fc;font-weight:700' : ''}">${gapStr}</span>
+        </div>
+      </div>`;
+  });
+  board.innerHTML = html;
+  for (const row of board.querySelectorAll(".dl-row")) {
+    row.addEventListener("click", () => {
+      const id = parseInt(row.dataset.lapId, 10);
+      if (id) viewLap(id);
+    });
+  }
+}
+
 function visibleLaps() {
   let laps = state.laps.slice();
   if (state.roleFilter === "player")
     laps = laps.filter((l) => l.car_role === "player");
   else if (state.roleFilter === "ghost")
     laps = laps.filter((l) => l.car_role !== "player");
+  if (state.driverFilter !== "all")
+    laps = laps.filter((l) => (l.driver_name || (l.car_role === "player" ? "You" : "")) === state.driverFilter);
   if (state.assistFilter !== "all")
     laps = laps.filter((l) =>
       assistsOn(l.assists) === (state.assistFilter === "on"));
@@ -866,9 +945,31 @@ function renderLapList() {
   const box = $("lap-list");
   box.innerHTML = "";
   if (!state.laps.length) {
+    $("driver-leaderboard").style.display = "none";
     box.innerHTML = '<div class="empty-list">No complete laps on this track yet — finish a full lap and it appears here automatically.</div>';
     return;
   }
+
+  // Calculate track record (overall best) and personal best per driver
+  const validLaps = state.laps.filter((l) => l.valid && l.lap_time_ms);
+  const bestOverall = validLaps.length
+    ? validLaps.reduce((best, l) => l.lap_time_ms < best.lap_time_ms ? l : best, validLaps[0])
+    : null;
+  const bestOverallId = bestOverall ? bestOverall.id : null;
+
+  // Driver -> best lap id
+  const pbMap = new Map();
+  for (const l of validLaps) {
+    const key = l.driver_name || (l.car_role === "player" ? "You" : null);
+    if (!key) continue;
+    if (!pbMap.has(key) || l.lap_time_ms < pbMap.get(key).lap_time_ms) {
+      pbMap.set(key, l);
+    }
+  }
+  const pbIdSet = new Set(Array.from(pbMap.values()).map((l) => l.id));
+
+  renderDriverLeaderboard(bestOverallId, pbMap);
+
   const laps = visibleLaps();
   if (!laps.length) {
     box.innerHTML = '<div class="empty-list">All laps are hidden by the current filters.</div>';
@@ -877,9 +978,6 @@ function renderLapList() {
   const ranked = state.sort === "fastest";
   const baseMs = ranked ? laps[0].lap_time_ms : null;
   let lastSession = null;
-  const bestId = state.laps.reduce((b, l) =>
-    l.car_role === "player" && l.valid &&
-    (!b || l.lap_time_ms < b.lap_time_ms) ? l : b, null)?.id;
   laps.forEach((lap, i) => {
     if (!ranked && lap.session_id !== lastSession) {
       lastSession = lap.session_id;
@@ -917,12 +1015,20 @@ function renderLapList() {
       row.title = "a ghost's pace: lap clock vs distance and sector times" +
         " — no telemetry to view, so clicking compares against it";
     }
+
+    let badgeTag = "";
+    if (lap.id === bestOverallId) {
+      badgeTag = '<span class="rec" title="Track Record (overall fastest)">RECORD</span>';
+    } else if (pbIdSet.has(lap.id)) {
+      badgeTag = '<span class="pb" title="Personal Best for this driver">PB</span>';
+    }
+
     row.innerHTML = `
       ${ranked ? `<span class="rank">${i + 1}</span>` : ""}
       ${roleBadge(lap.car_role)}
       <div class="lap-main">
         <div class="lap-time">${fmtTime(lap.lap_time_ms, 1)} ${gap}
-          ${lap.id === bestId ? '<span class="pb">BEST</span>' : ""}
+          ${badgeTag}
           ${lap.valid ? "" : '<span class="inv">INV</span>'}</div>
         <div class="lap-sub">${sub}</div>
       </div>
@@ -2270,6 +2376,10 @@ $("role-seg").addEventListener("click", (e) => {
   state.roleFilter = b.dataset.role === state.roleFilter ? "all" : b.dataset.role;
   for (const x of document.querySelectorAll("#role-seg button"))
     x.classList.toggle("on", x.dataset.role === state.roleFilter);
+  renderLapList();
+});
+$("driver-select")?.addEventListener("change", (e) => {
+  state.driverFilter = e.target.value;
   renderLapList();
 });
 $("asst-seg").addEventListener("click", (e) => {
