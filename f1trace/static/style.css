@@ -207,14 +207,40 @@ header {
 .lap-row.sel { background: #0c2b33; box-shadow: inset 3px 0 0 var(--accent); }
 .lap-row.ref-sel { box-shadow: inset -3px 0 0 var(--ref); }
 .lap-row.sel.ref-sel { box-shadow: inset 3px 0 0 var(--accent), inset -3px 0 0 var(--ref); }
-.badge {
-  font-size: 9px; font-weight: 900; padding: 2px 6px; border-radius: 3px;
-  letter-spacing: 1px; flex: none; transform: skewX(-8deg);
-}
 .badge.player { background: #123a44; color: var(--accent); }
 .badge.rival  { background: #3a2410; color: var(--ref); }
 .badge.pb_ghost { background: #262c3a; color: #9aa7bd; }
 .badge.guest { background: #2a2140; color: #b7a4f5; }   /* imported lap */
+
+/* F1 TV Broadcast Graphics */
+.f1-driver-badge {
+  display: flex; align-items: center; gap: 5px; flex: none;
+  background: #141722; border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px; padding: 2px 5px 2px 0; height: 22px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+.f1-team-bar {
+  width: 4px; height: 100%; border-radius: 3px 0 0 3px; flex: none;
+}
+.f1-team-bar.small {
+  width: 3px; height: 12px; border-radius: 2px;
+}
+.f1-code {
+  font-family: 'Titillium Web', sans-serif; font-size: 11px;
+  font-weight: 900; font-style: italic; letter-spacing: 1px;
+  color: #f8fafc; padding: 0 1px; line-height: 1;
+}
+.f1-tyre {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 15px; height: 15px; border-radius: 50%;
+  border: 1.5px solid currentColor; background: #0b0d13;
+  flex: none; box-sizing: border-box;
+}
+.f1-tyre .tyre-inner {
+  font-family: 'Titillium Web', sans-serif;
+  font-size: 8px; font-weight: 900; font-style: normal;
+  line-height: 1; text-align: center;
+}
 .lap-main { flex: 1; min-width: 0; }
 .lap-time { font-weight: 700; font-variant-numeric: tabular-nums; }
 .lap-sub { font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; }

@@ -828,11 +828,66 @@ function fmtSession(lap) {
   return `${at} · ${lap.session_type_name || "?"} · session #${lap.session_id}`;
 }
 
-function roleBadge(role) {
-  // your own laps are the default case — only other cars' laps get a badge
-  if (role === "player") return "";
-  const label = { rival: "RIVAL", pb_ghost: "PB·G", guest: "GUEST" }[role] || role;
-  return `<span class="badge ${role}">${label}</span>`;
+/* F1 Broadcast aesthetics helpers: Team colors, 3-letter driver codes, tyre graphics */
+const F1_TEAM_COLORS = {
+  "ferrari": "#e80020",
+  "red bull": "#3671c6",
+  "mercedes": "#27f4d2",
+  "mclaren": "#ff8000",
+  "aston martin": "#229971",
+  "alpine": "#0093cc",
+  "williams": "#64c4ff",
+  "racing bulls": "#6692ff",
+  "haas": "#b6babd",
+  "sauber": "#52e252",
+  "audi": "#c0c0c0",
+  "cadillac": "#e5a823"
+};
+
+function getTeamColor(teamName) {
+  if (!teamName) return "#64748b";
+  const lower = teamName.toLowerCase();
+  for (const [k, v] of Object.entries(F1_TEAM_COLORS)) {
+    if (lower.includes(k)) return v;
+  }
+  return "#64748b";
+}
+
+function driverCode(name) {
+  if (!name) return "DRV";
+  const clean = name.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+  if (clean.length <= 3) return clean.padEnd(3, " ");
+  // If format like "SebastianGuevara", use first 3 chars or last name if detectable
+  return clean.slice(0, 3);
+}
+
+const TYRE_DEFS = {
+  16: { code: "S", name: "SOFT", color: "#ef4444" },
+  17: { code: "M", name: "MED",  color: "#eab308" },
+  18: { code: "H", name: "HRD",  color: "#f8fafc" },
+  19: { code: "I", name: "INT",  color: "#22c55e" },
+  20: { code: "W", name: "WET",  color: "#3b82f6" },
+};
+
+function tyreBadge(tyreVisual) {
+  const t = TYRE_DEFS[tyreVisual] || { code: "—", name: "TYRE", color: "#94a3b8" };
+  return `<span class="f1-tyre" style="border-color:${t.color};color:${t.color}" title="${t.name}">` +
+         `<span class="tyre-inner">${t.code}</span></span>`;
+}
+
+function roleBadge(lap) {
+  if (isPaceRef(lap)) {
+    const label = lap.car_role === "rival" ? "RIVAL" : "PB·G";
+    return `<span class="badge ${lap.car_role}">${label}</span>`;
+  }
+  const code = driverCode(lap.driver_name || (lap.car_role === "player" ? "YOU" : "GUEST"));
+  const teamCol = getTeamColor(lap.team_name);
+  return `
+    <div class="f1-driver-badge" title="${escapeHtml(lap.driver_name || 'Driver')} (${escapeHtml(lap.team_name || 'F1 Team')})">
+      <span class="f1-team-bar" style="background:${teamCol}"></span>
+      <span class="f1-code">${code}</span>
+      ${tyreBadge(lap.tyre_visual)}
+    </div>`;
 }
 
 /* Ghost laps are times-only pace references: real lap clock vs distance
@@ -902,12 +957,15 @@ function renderDriverLeaderboard(bestOverallId, pbMap) {
   list.forEach((l, idx) => {
     const isRecord = idx === 0;
     const name = l.driver_name || "You";
+    const teamCol = getTeamColor(l.team_name);
     const gapStr = idx > 0 ? `+${((l.lap_time_ms - baseMs) / 1000).toFixed(3)}s` : "RECORD";
     html += `
-      <div class="dl-row ${isRecord ? "rec" : ""}" data-lap-id="${l.id}" title="Click to view ${escapeHtml(name)}'s best lap">
+      <div class="dl-row ${isRecord ? "rec" : ""}" data-lap-id="${l.id}" title="Click to view ${escapeHtml(name)}'s best lap (${escapeHtml(l.team_name || 'Team')})">
         <div class="dl-left">
+          <span class="f1-team-bar small" style="background:${teamCol}"></span>
           <span class="dl-pos">${idx + 1}</span>
           <span class="dl-name">${escapeHtml(name)}</span>
+          ${tyreBadge(l.tyre_visual)}
         </div>
         <div class="dl-right">
           <span class="dl-time">${fmtTime(l.lap_time_ms, 1)}</span>
@@ -1025,7 +1083,7 @@ function renderLapList() {
 
     row.innerHTML = `
       ${ranked ? `<span class="rank">${i + 1}</span>` : ""}
-      ${roleBadge(lap.car_role)}
+      ${roleBadge(lap)}
       <div class="lap-main">
         <div class="lap-time">${fmtTime(lap.lap_time_ms, 1)} ${gap}
           ${badgeTag}
