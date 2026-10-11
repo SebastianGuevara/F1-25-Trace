@@ -532,6 +532,7 @@ header {
 #cvA-brk   { color: #f87171; }
 #cvA-steer { color: #a78bfa; }
 #cvA-gear  { color: #38bdf8; }
+#cvA-ersstore { color: #f59e0b; }
 #cvA-ers   { font-size: 10px; }
 canvas.chart { flex: 1; min-width: 0; min-height: 0; cursor: crosshair; }
 

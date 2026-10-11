@@ -1566,6 +1566,7 @@ const charts = [
   { id: "ch-steer", col: "str", min: -100, max: 100, zero: true,
     color: "#a78bfa" },                                             // violet
   { id: "ch-gear", col: "gear", step: "gear" },                     // gear N..8
+  { id: "ch-ersstore", col: "ers", min: 0, max: 100, scale: 25, color: "#f59e0b" }, // ERS store % (0..4 MJ -> 0..100%)
   { id: "ch-ers", col: "ersm", step: "ers" },                       // ERS deploy mode
 ];
 const chartCache = {};   // id -> {img, xOf, w, h}
@@ -1745,7 +1746,10 @@ function buildChart(cfg) {
   }
 
   function trace(lap, color, alpha, width) {
-    const s = lap.samples, col = s[cfg.col];
+    const s = lap.samples, rawCol = s[cfg.col];
+    if (!rawCol) return;
+    const mult = cfg.scale || 1;
+    const col = mult === 1 ? rawCol : rawCol.map((v) => (v != null ? v * mult : 0));
     const i0 = Math.max(0, lowerIdx(s.d, d0) - 1);
     const i1 = Math.min(s.d.length - 1, lowerIdx(s.d, d1) + 2);
     ctx.save();
@@ -1871,7 +1875,7 @@ function chartWheel(e, cv) {
   chartZoomAt(cv, e.clientX, wheelZoomFactor(e));
 }
 
-for (const id of ["ch-speed", "ch-thr", "ch-brk", "ch-steer", "ch-gear", "ch-ers", "ch-delta"]) {
+for (const id of ["ch-speed", "ch-thr", "ch-brk", "ch-steer", "ch-gear", "ch-ersstore", "ch-ers", "ch-delta"]) {
   const cv = $(id);
   let dragging = false;
   cv.addEventListener("mousedown", (e) => { dragging = true; chartSeek(e, cv); });
@@ -2160,6 +2164,11 @@ function cursorReadouts(t, dA) {
   gA.textContent = sA.gear ? gearName(interp(sA.t, sA.gear, t)) : "—";
   gB.textContent = B && B.samples.gear
     ? gearName(interp(B.samples.d, B.samples.gear, Math.min(dA, B.maxD)))
+    : "";
+  const esA = $("cvA-ersstore"), esB = $("cvB-ersstore");
+  esA.textContent = sA.ers ? Math.round(Math.max(0, Math.min(100, interp(sA.t, sA.ers, t) * 25))) + "%" : "—";
+  esB.textContent = B && B.samples.ers
+    ? Math.round(Math.max(0, Math.min(100, interp(B.samples.d, B.samples.ers, Math.min(dA, B.maxD)) * 25))) + "%"
     : "";
   const eA = $("cvA-ers"), eB = $("cvB-ers");
   if (sA.ersm) {
