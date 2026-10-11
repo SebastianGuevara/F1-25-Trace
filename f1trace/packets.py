@@ -83,23 +83,25 @@ def parse_session(data):
 # ---------------------------------------------------------------- participants
 
 def parse_participants(data, fmt):
-    """Return {car_idx: team_id} for the active cars.
+    """Return ({car_idx: team_id}, {car_idx: driver_name}) for active cars.
 
     Layout: header, numActiveCars (B), then one fixed-size record per car
     slot. teamId moved between formats: 2026 widened driverId and
     networkId to uint16, putting teamId as uint16 at offset +5; in the
     2025 layout all three lead fields are single bytes and teamId is a
-    uint8 at offset +3. Per-record size is derived from the packet length
-    so a layout change degrades to skipping, not misparsing."""
+    uint8 at offset +3. Name is a null-terminated UTF-8 string located
+    right after nationality (offset +10 in 2026, offset +7 in 2025)."""
     n = num_cars(fmt)
     body = len(data) - HEADER.size - 1
     if body <= 0 or body % n:
-        return {}
+        return {}, {}
     size = body // n
-    if size < 8:
-        return {}
+    if size < 12:
+        return {}, {}
     n_active = data[HEADER.size]
-    out = {}
+    teams = {}
+    names = {}
+    name_off = 10 if fmt >= 2026 else 7
     for idx in range(min(n, n_active)):
         base = HEADER.size + 1 + idx * size
         if fmt >= 2026:
@@ -107,8 +109,13 @@ def parse_participants(data, fmt):
         else:
             team = data[base + 3]
         if team < 2000:
-            out[idx] = team
-    return out
+            teams[idx] = team
+        # Read driver / gamertag name
+        raw_name = data[base + name_off : base + min(size, name_off + 48)]
+        name_clean = raw_name.split(b"\x00", 1)[0].decode("utf-8", "replace").strip()
+        if name_clean:
+            names[idx] = name_clean
+    return teams, names
 
 
 # ---------------------------------------------------------------- car setups

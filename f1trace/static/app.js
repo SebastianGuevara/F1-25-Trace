@@ -68,6 +68,11 @@ function fmtTime(ms, forceMin) {
 function fmtDelta(sec) {
   return (sec >= 0 ? "+" : "−") + Math.abs(sec).toFixed(3);
 }
+function escapeHtml(str) {
+  return String(str || "").replace(/[&<>"']/g, (m) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[m]));
+}
 
 /* Binary search: index of last element <= v in sorted arr. */
 function lowerIdx(arr, v) {
@@ -901,11 +906,12 @@ function renderLapList() {
     const gap = ranked && i > 0 && lap.lap_time_ms && baseMs
       ? `<span class="gap">+${((lap.lap_time_ms - baseMs) / 1000).toFixed(3)}</span>` : "";
     const team = lap.team_name ? lap.team_name + " · " : "";
+    const driver = lap.driver_name ? `<span class="driver-tag">${escapeHtml(lap.driver_name)}</span> · ` : "";
     const sub = isPaceRef(lap)
-      ? `${team}pace — times only`
+      ? `${driver}${team}pace — times only`
       : ranked
-        ? `${team}${fmtSession(lap).split(" · ")[0]} · L${lap.lap_num}`
-        : `${team}L${lap.lap_num}`;
+        ? `${driver}${team}${fmtSession(lap).split(" · ")[0]} · L${lap.lap_num}`
+        : `${driver}${team}L${lap.lap_num}`;
     if (isPaceRef(lap)) {
       row.classList.add("pace");
       row.title = "a ghost's pace: lap clock vs distance and sector times" +
@@ -1907,9 +1913,11 @@ function rebuildScene() {
   $("empty-hint").style.display = has ? "none" : "";
   $("map-toolbar").style.display = has ? "" : "none";
   $("sector-card").style.display = has ? "" : "none";
+  const nameA = state.lapA.driver_name || state.lapA.car_role;
+  const nameB = state.lapB ? (state.lapB.driver_name || state.lapB.car_role) : "";
   $("map-legend").innerHTML = has
-    ? `<span class="k kA">${fmtTime(state.lapA.lap_time_ms, 1)} (${state.lapA.car_role})</span>` +
-      (state.lapB ? `<span class="k kB">${fmtTime(state.lapB.lap_time_ms, 1)} (${state.lapB.car_role}) — reference</span>` : "")
+    ? `<span class="k kA">${fmtTime(state.lapA.lap_time_ms, 1)} (${escapeHtml(nameA)})</span>` +
+      (state.lapB ? `<span class="k kB">${fmtTime(state.lapB.lap_time_ms, 1)} (${escapeHtml(nameB)}) — reference</span>` : "")
     : "";
   if (!has) { mapStatic = null; drawMap(); return; }
   const A = state.lapA;

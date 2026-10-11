@@ -66,6 +66,7 @@ class Recorder(threading.Thread):
         self.telem2 = {}        # car_idx -> dict
         self.setups = {}        # car_idx -> setup dict
         self.teams = {}         # car_idx -> team id
+        self.driver_names = {}  # car_idx -> gamertag / driver name
         self.sess_assists = None   # player assist settings (Session packet)
         self.pb_idx = 255          # Time Trial ghost car indices
         self.rival_idx = 255
@@ -163,7 +164,9 @@ class Recorder(threading.Thread):
         elif pid == packets.CAR_SETUPS:
             self.setups.update(packets.parse_car_setups(data, fmt, self._wanted()))
         elif pid == packets.PARTICIPANTS:
-            self.teams.update(packets.parse_participants(data, fmt))
+            teams, names = packets.parse_participants(data, fmt)
+            self.teams.update(teams)
+            self.driver_names.update(names)
         elif pid == packets.TIME_TRIAL:
             self.tt = packets.parse_time_trial(data, fmt)
         elif pid == packets.SESSION:
@@ -406,22 +409,25 @@ class Recorder(threading.Thread):
         st = self.car_status.get(idx) or {}
         assists = self._assists_for(st)
         setup = self.setups.get(idx)
+        driver_name = self.driver_names.get(idx)
         self.con.execute(
             "INSERT INTO laps (session_id, car_role, car_index, lap_num,"
             " lap_time_ms, s1_ms, s2_ms, s3_ms, valid, tyre_visual,"
             " top_speed, n_samples, created_at, samples, setup, assists,"
-            " team_id)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " team_id, driver_name)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (self.session_row_id, "player", idx, buf.lap_num, lap_time_ms,
              s1, s2, s3, 0 if buf.invalid else 1,
              st.get("tyre_visual"), max(cols["spd"]) if cols["spd"] else 0,
              len(samples), _now(), db.pack_samples(cols),
              json.dumps(setup) if setup else None,
              json.dumps(assists) if assists else None,
-             self.teams.get(idx)))
+             self.teams.get(idx), driver_name))
         self.con.commit()
-        print("[f1trace] stored lap %d — %s%s" % (
-            buf.lap_num, _fmt_time(lap_time_ms),
+        print("[f1trace] stored lap %d%s — %s%s" % (
+            buf.lap_num,
+            (" (%s)" % driver_name) if driver_name else "",
+            _fmt_time(lap_time_ms),
             "" if not buf.invalid else " (invalid)"))
         self._set_status(last_lap={
             "role": "player", "lap_num": buf.lap_num,

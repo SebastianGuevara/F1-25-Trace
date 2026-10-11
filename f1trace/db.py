@@ -39,7 +39,8 @@ CREATE TABLE IF NOT EXISTS laps (
     samples BLOB,
     setup TEXT,                      -- JSON car setup snapshot, if broadcast
     assists TEXT,                    -- JSON assist settings, if known
-    team_id INTEGER                  -- constructor (Participants packet)
+    team_id INTEGER,                 -- constructor (Participants packet)
+    driver_name TEXT                 -- Gamertag / player name
 );
 CREATE INDEX IF NOT EXISTS idx_laps_session ON laps(session_id);
 """
@@ -59,7 +60,7 @@ def _migrate(con):
     """Add columns introduced after the first release to existing DBs."""
     cols = {r[1] for r in con.execute("PRAGMA table_info(laps)")}
     for col, typ in (("setup", "TEXT"), ("assists", "TEXT"),
-                     ("team_id", "INTEGER")):
+                     ("team_id", "INTEGER"), ("driver_name", "TEXT")):
         if col not in cols:
             con.execute("ALTER TABLE laps ADD COLUMN %s %s" % (col, typ))
     _strip_ghost_channels(con)

@@ -167,7 +167,7 @@ def make_handler(db_path, recorder, demo=False):
                 " l.lap_time_ms, l.s1_ms, l.s2_ms, l.s3_ms, l.valid,"
                 " l.tyre_visual, l.top_speed, l.n_samples, l.created_at,"
                 " l.assists, l.setup IS NOT NULL AS has_setup, l.team_id,"
-                " l.session_id, s.started_at, s.session_type_name,"
+                " l.driver_name, l.session_id, s.started_at, s.session_type_name,"
                 " s.packet_format"
                 " FROM laps l JOIN sessions s ON s.id = l.session_id"
                 " WHERE s.track_id=?"
@@ -301,8 +301,8 @@ def make_handler(db_path, recorder, demo=False):
                     "INSERT INTO laps (session_id, car_role, car_index,"
                     " lap_num, lap_time_ms, s1_ms, s2_ms, s3_ms, valid,"
                     " tyre_visual, top_speed, n_samples, created_at, samples,"
-                    " setup, assists, team_id)"
-                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    " setup, assists, team_id, driver_name)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (sid, "guest", _opt_int(lap.get("car_index")),
                      _opt_int(lap.get("lap_num")), lap_time_ms,
                      _opt_int(lap.get("s1_ms")), _opt_int(lap.get("s2_ms")),
@@ -313,7 +313,8 @@ def make_handler(db_path, recorder, demo=False):
                      db.pack_samples(samples),
                      json.dumps(setup) if setup else None,
                      json.dumps(assists) if assists else None,
-                     _opt_int(lap.get("team_id"))))
+                     _opt_int(lap.get("team_id")),
+                     str(lap.get("driver_name"))[:48] if lap.get("driver_name") else None))
                 con.commit()
             except (KeyError, TypeError, ValueError):
                 return self._json({"error": "corrupt lap file"}, 400)
