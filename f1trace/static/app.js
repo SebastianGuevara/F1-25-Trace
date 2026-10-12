@@ -1087,13 +1087,13 @@ function renderLapList() {
             ${badgeTag}
             ${lap.valid ? "" : '<span class="inv">INV</span>'}
           </div>
-          <div class="lap-actions">
-            <button class="refbtn ${isRef ? "on" : ""}"
-              title="${isRef ? "stop comparing against this lap" : "compare the viewed lap against this one"}">VS</button>
-            ${state.readonly ? "" : '<button class="del" title="delete lap">✕</button>'}
-          </div>
         </div>
         <div class="lap-sub">${sectorsHtml}</div>
+      </div>
+      <div class="lap-actions">
+        <button class="refbtn ${isRef ? "on" : ""}"
+          title="${isRef ? "stop comparing against this lap" : "compare the viewed lap against this one"}">VS</button>
+        ${state.readonly ? "" : '<button class="del" title="delete lap">✕</button>'}
       </div>`;
     row.addEventListener("click", () =>
       isPaceRef(lap) ? toggleRef(lap.id) : viewLap(lap.id));

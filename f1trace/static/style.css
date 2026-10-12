@@ -95,7 +95,7 @@ header {
 /* ---------- layout ---------- */
 #layout { flex: 1; display: flex; min-height: 0; }
 #sidebar {
-  width: 275px; flex: none; border-right: 1px solid var(--line);
+  width: 310px; flex: none; border-right: 1px solid var(--line);
   background: var(--panel); display: flex; flex-direction: column; min-height: 0;
 }
 .side-head {
@@ -241,30 +241,36 @@ header {
   font-size: 8px; font-weight: 900; font-style: normal;
   line-height: 1; text-align: center;
 }
-.lap-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.lap-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-.lap-time { font-weight: 700; font-variant-numeric: tabular-nums; display: flex; align-items: center; gap: 4px; }
+.lap-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.lap-top { display: flex; align-items: center; gap: 6px; }
+.lap-time { font-weight: 700; font-variant-numeric: tabular-nums; display: flex; align-items: center; gap: 5px; font-size: 13px; }
 .lap-actions { display: flex; align-items: center; gap: 4px; flex: none; }
 .lap-sub {
   font-size: 10px; color: var(--dim); font-variant-numeric: tabular-nums;
   display: flex; align-items: center; gap: 8px;
 }
-.sec-item { display: inline-flex; align-items: center; gap: 3px; }
+.sec-item { display: inline-flex; align-items: center; gap: 3px; font-weight: 600; }
 .sec-item .s1 { color: #f87171; font-size: 9px; }
 .sec-item .s2 { color: #60a5fa; font-size: 9px; }
 .sec-item .s3 { color: #fbbf24; font-size: 9px; }
 .lap-row .inv { color: var(--red); font-size: 10px; font-weight: 700; }
 .refbtn {
-  background: rgba(255, 255, 255, 0.04); border: 1px solid #333947; color: #818cf8;
-  font-family: 'Titillium Web', sans-serif; font-size: 10px; font-weight: 900; font-style: italic;
-  letter-spacing: 0.5px; border-radius: 3px; padding: 1px 7px; cursor: pointer;
-  line-height: 1.4; flex: none; transition: all 0.15s ease;
+  background: rgba(255, 255, 255, 0.04); border: 1px solid #3b4254; color: #94a3b8;
+  font-family: 'Titillium Web', sans-serif; font-size: 11px; font-weight: 900; font-style: italic;
+  letter-spacing: 1px; border-radius: 5px; padding: 6px 12px; cursor: pointer;
+  line-height: 1.2; flex: none; transition: all 0.15s ease;
 }
-.refbtn:hover { border-color: var(--ref); color: var(--ref); background: rgba(251, 146, 60, 0.15); }
-.refbtn.on { background: var(--ref); border-color: var(--ref); color: #1b0f02; font-weight: 900; }
+.refbtn:hover {
+  border-color: var(--ref); color: var(--ref);
+  background: rgba(251, 146, 60, 0.18); transform: scale(1.04);
+}
+.refbtn.on {
+  background: var(--ref); border-color: var(--ref); color: #1b0f02; font-weight: 900;
+  box-shadow: 0 0 10px rgba(251, 146, 60, 0.35);
+}
 .del {
-  background: none; border: none; color: #3d4657; font-size: 12px;
-  cursor: pointer; padding: 1px 2px; visibility: hidden; line-height: 1;
+  background: none; border: none; color: #3d4657; font-size: 13px;
+  cursor: pointer; padding: 2px 4px; visibility: hidden; line-height: 1;
 }
 .lap-row:hover .del { visibility: visible; }
 .del:hover { color: var(--red); }
