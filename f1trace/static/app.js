@@ -826,7 +826,7 @@ function stopLiveWatch() {
     btn.textContent = "WATCH";
     btn.classList.remove("watching");
   }
-  drawMap();
+  rebuildScene();
 }
 
 async function toggleLiveWatch() {
@@ -843,12 +843,8 @@ async function toggleLiveWatch() {
   if (!state.lapA && state.laps.length) {
     const first = state.laps[0];
     if (first) await viewLap(first.id);
-    state.liveWatching = true;
-    if (btn) {
-      btn.textContent = "WATCHING";
-      btn.classList.add("watching");
-    }
   }
+  rebuildScene();
   liveTick();
 }
 
@@ -898,8 +894,9 @@ async function liveTick() {
 
 function drawLiveChartCursors(live) {
   if (!state.lapA) return;
-  const dLive = live.distance;
+  const dLive = live.distance || 0;
   const dpr = window.devicePixelRatio || 1;
+  const trail = live.trail;
 
   for (const cfg of charts) {
     const id = cfg.id;
@@ -907,51 +904,203 @@ function drawLiveChartCursors(live) {
     if (!c) continue;
     const cv = $(id);
     const ctx = cv.getContext("2d");
+
+    // 1. Restore clean background (with grid, sectors, and faint benchmark reference)
     ctx.putImageData(c.img, 0, 0);
 
-    if (dLive < c.d0 || dLive > c.d1) continue;
-    const x = ((dLive - c.d0) / (c.d1 - c.d0)) * c.w;
+    const d0 = c.d0, d1 = c.d1;
+    const X = (d) => ((d - d0) / (d1 - d0)) * c.w;
+    const padT = c.padT || 3 * dpr, padB = c.padB || 3 * dpr;
 
-    // Glowing vertical live playhead line
-    ctx.strokeStyle = "#22d3ee";
-    ctx.lineWidth = 2 * dpr;
-    ctx.shadowColor = "#22d3ee";
-    ctx.shadowBlur = 6 * dpr;
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, c.h); ctx.stroke();
-    ctx.shadowBlur = 0;
+    // 2. Progressively paint the live curve from trail
+    if (trail && trail.d && trail.d.length > 0) {
+      const td = trail.d;
+      const n = td.length;
 
-    // Live value marker dot on the curve
-    let val = null;
-    let min = cfg.min != null ? cfg.min : 0;
-    let max = cfg.max != null ? cfg.max : 350;
-    if (cfg.col === "spd") { val = live.speed; max = 360; }
-    else if (cfg.col === "thr") { val = live.throttle; min = 0; max = 100; }
-    else if (cfg.col === "brk") { val = live.brake; min = 0; max = 100; }
-    else if (cfg.col === "str") { val = live.steer; min = -100; max = 100; }
-    else if (cfg.col === "gear") { val = live.gear; min = -1; max = 8; }
-    else if (cfg.col === "ers") { val = live.ers || 50; min = 0; max = 100; }
+      if (!cfg.step) {
+        // Continuous line chart: Speed, Throttle, Brake, Steer, ERS Store
+        const tv = trail[cfg.col];
+        if (tv && tv.length > 0) {
+          let min = cfg.min != null ? cfg.min : 0;
+          let max = cfg.max != null ? cfg.max : (c.max || 360);
+          if (cfg.col === "spd") max = c.max || 360;
+          const Y = (v) => padT + (1 - (v - min) / (max - min)) * (c.h - padT - padB);
 
-    if (val != null) {
-      const padT = 3 * dpr, padB = 3 * dpr;
-      const y = padT + (1 - (val - min) / (max - min)) * (c.h - padT - padB);
-      ctx.beginPath();
-      ctx.arc(x, y, 4 * dpr, 0, Math.PI * 2);
-      ctx.fillStyle = cfg.color || "#22d3ee";
-      ctx.strokeStyle = "#ffffff";
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(0, 0, c.w, c.h);
+          ctx.clip();
+
+          ctx.beginPath();
+          ctx.moveTo(X(td[0]), Y(tv[0]));
+          for (let i = 1; i < n; i++) {
+            ctx.lineTo(X(td[i]), Y(tv[i]));
+          }
+          ctx.strokeStyle = cfg.color || "#22d3ee";
+          ctx.lineWidth = 2.4 * dpr;
+          ctx.lineCap = "round";
+          ctx.lineJoin = "round";
+          ctx.shadowColor = cfg.color || "#22d3ee";
+          ctx.shadowBlur = 4 * dpr;
+          ctx.stroke();
+          ctx.restore();
+        }
+      } else if (cfg.step === "gear") {
+        // Step chart: Gear (N..8)
+        const tg = trail.gear;
+        if (tg && tg.length > 0) {
+          const top = 8;
+          const laneH = (c.h - padT - padB) / 9;
+          const lvl = (v) => Math.max(0, Math.min(top, Math.round(v || 0)));
+          const Yg = (v) => padT + (top - lvl(v)) * laneH + laneH / 2;
+
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(0, 0, c.w, c.h);
+          ctx.clip();
+          ctx.lineWidth = 2.4 * dpr;
+          ctx.lineJoin = "miter";
+          ctx.shadowColor = "#38bdf8";
+          ctx.shadowBlur = 3 * dpr;
+
+          let i = 0;
+          while (i < n) {
+            const m = lvl(tg[i]);
+            let j = i + 1;
+            while (j < n && lvl(tg[j]) === m) j++;
+            const nextIdx = Math.min(j, n - 1);
+            ctx.beginPath();
+            ctx.moveTo(X(td[i]), Yg(m));
+            ctx.lineTo(X(td[nextIdx]), Yg(m));
+            ctx.strokeStyle = "#38bdf8";
+            ctx.stroke();
+
+            if (j < n) {
+              const nextM = lvl(tg[j]);
+              if (nextM !== m) {
+                ctx.beginPath();
+                ctx.moveTo(X(td[nextIdx]), Yg(m));
+                ctx.lineTo(X(td[nextIdx]), Yg(nextM));
+                ctx.strokeStyle = "#38bdf8";
+                ctx.stroke();
+              }
+            }
+            i = j;
+          }
+          ctx.restore();
+        }
+      } else if (cfg.step === "ers") {
+        // Step chart: ERS Mode (0..3)
+        const tm = trail.ersm;
+        if (tm && tm.length > 0) {
+          const top = 3;
+          const laneH = (c.h - padT - padB) / 4;
+          const lvl = (v) => Math.max(0, Math.min(top, Math.round(v || 0)));
+          const Ym = (v) => padT + (top - lvl(v)) * laneH + laneH / 2;
+
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(0, 0, c.w, c.h);
+          ctx.clip();
+          ctx.lineWidth = 2.4 * dpr;
+          ctx.lineJoin = "miter";
+
+          let i = 0;
+          while (i < n) {
+            const m = lvl(tm[i]);
+            let j = i + 1;
+            while (j < n && lvl(tm[j]) === m) j++;
+            const nextIdx = Math.min(j, n - 1);
+            const col = ERS_MODES[m] ? ERS_MODES[m].color : "#fb923c";
+            ctx.shadowColor = col;
+            ctx.shadowBlur = 3 * dpr;
+
+            ctx.beginPath();
+            ctx.moveTo(X(td[i]), Ym(m));
+            ctx.lineTo(X(td[nextIdx]), Ym(m));
+            ctx.strokeStyle = col;
+            ctx.stroke();
+
+            if (j < n) {
+              const nextM = lvl(tm[j]);
+              if (nextM !== m) {
+                const nextCol = ERS_MODES[nextM] ? ERS_MODES[nextM].color : "#fb923c";
+                ctx.shadowColor = nextCol;
+                ctx.beginPath();
+                ctx.moveTo(X(td[nextIdx]), Ym(m));
+                ctx.lineTo(X(td[nextIdx]), Ym(nextM));
+                ctx.strokeStyle = nextCol;
+                ctx.stroke();
+              }
+            }
+            i = j;
+          }
+          ctx.restore();
+        }
+      }
+    }
+
+    // 3. Vertical live playhead cursor line
+    if (dLive >= d0 && dLive <= d1) {
+      const curX = X(dLive);
+      ctx.strokeStyle = "rgba(34, 211, 238, 0.65)";
       ctx.lineWidth = 1.5 * dpr;
-      ctx.shadowColor = cfg.color || "#22d3ee";
-      ctx.shadowBlur = 10 * dpr;
-      ctx.fill(); ctx.stroke();
-      ctx.shadowBlur = 0;
+      ctx.beginPath();
+      ctx.moveTo(curX, 0);
+      ctx.lineTo(curX, c.h);
+      ctx.stroke();
+
+      // 4. Glowing marker dot at current position
+      let val = null;
+      let min = cfg.min != null ? cfg.min : 0;
+      let max = cfg.max != null ? cfg.max : (c.max || 360);
+      if (cfg.col === "spd") { val = live.speed; max = c.max || 360; }
+      else if (cfg.col === "thr") { val = live.throttle; min = 0; max = 100; }
+      else if (cfg.col === "brk") { val = live.brake; min = 0; max = 100; }
+      else if (cfg.col === "str") { val = live.steer; min = -100; max = 100; }
+      else if (cfg.col === "ers") { val = live.ers != null ? live.ers : 0; min = 0; max = 100; }
+
+      let curY = null;
+      if (val != null) {
+        curY = padT + (1 - (val - min) / (max - min)) * (c.h - padT - padB);
+      } else if (cfg.step === "gear") {
+        const top = 8;
+        const laneH = (c.h - padT - padB) / 9;
+        const lvl = (v) => Math.max(0, Math.min(top, Math.round(v || 0)));
+        curY = padT + (top - lvl(live.gear)) * laneH + laneH / 2;
+      } else if (cfg.step === "ers") {
+        const top = 3;
+        const laneH = (c.h - padT - padB) / 4;
+        const lvl = (v) => Math.max(0, Math.min(top, Math.round(v || 0)));
+        curY = padT + (top - lvl(live.ers_mode)) * laneH + laneH / 2;
+      }
+
+      if (curY != null) {
+        const dotCol = cfg.step === "ers"
+          ? (ERS_MODES[Math.max(0, Math.min(3, live.ers_mode || 0))]?.color || "#fb923c")
+          : (cfg.color || "#22d3ee");
+        ctx.beginPath();
+        ctx.arc(curX, curY, 4 * dpr, 0, Math.PI * 2);
+        ctx.fillStyle = "#ffffff";
+        ctx.strokeStyle = dotCol;
+        ctx.lineWidth = 1.8 * dpr;
+        ctx.shadowColor = dotCol;
+        ctx.shadowBlur = 8 * dpr;
+        ctx.fill();
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+      }
     }
   }
 
-  // Update chart header numbers in real time
+  // 5. Update chart header numbers in real time
   const spdEl = $("cvA-speed"); if (spdEl) spdEl.textContent = Math.round(live.speed);
   const thrEl = $("cvA-thr"); if (thrEl) thrEl.textContent = Math.round(live.throttle) + "%";
   const brkEl = $("cvA-brk"); if (brkEl) brkEl.textContent = Math.round(live.brake) + "%";
   const strEl = $("cvA-steer"); if (strEl) strEl.textContent = live.steer <= -3 ? "L " + Math.round(-live.steer) : live.steer >= 3 ? "R " + Math.round(live.steer) : "0";
   const gearEl = $("cvA-gear"); if (gearEl) gearEl.textContent = gearName(live.gear);
+  const ersstoreEl = $("cvA-ersstore"); if (ersstoreEl) ersstoreEl.textContent = Math.round(live.ers != null ? live.ers : 0) + "%";
+  const ersEl = $("cvA-ers"); if (ersEl) ersEl.textContent = ersModeName(live.ers_mode);
 }
 
 /* ---------------------------------------------------------------- tracks & laps */
@@ -1576,13 +1725,28 @@ function renderMapStatic() {
   const lineW = Math.max(2.6, 1.9 * mpx) * dpr;
   const P = mapXZ(A);
   const stepN = Math.max(1, Math.floor(P.x.length / 900));
-  for (let i = stepN; i < P.x.length; i += stepN) {
-    dctx.beginPath();
-    dctx.moveTo(W2X(P.x[i - stepN]), W2Y(P.z[i - stepN]));
-    dctx.lineTo(W2X(P.x[i]), W2Y(P.z[i]));
-    dctx.strokeStyle = A.lineColors[i];
-    dctx.lineWidth = lineW; dctx.lineCap = "round";
-    dctx.stroke();
+  if (state.liveWatching) {
+    // In live watching mode: show reference lap line faintly so the bright live trail pops as the car drives!
+    dctx.save();
+    dctx.globalAlpha = 0.22;
+    for (let i = stepN; i < P.x.length; i += stepN) {
+      dctx.beginPath();
+      dctx.moveTo(W2X(P.x[i - stepN]), W2Y(P.z[i - stepN]));
+      dctx.lineTo(W2X(P.x[i]), W2Y(P.z[i]));
+      dctx.strokeStyle = "#64748b";
+      dctx.lineWidth = lineW; dctx.lineCap = "round";
+      dctx.stroke();
+    }
+    dctx.restore();
+  } else {
+    for (let i = stepN; i < P.x.length; i += stepN) {
+      dctx.beginPath();
+      dctx.moveTo(W2X(P.x[i - stepN]), W2Y(P.z[i - stepN]));
+      dctx.lineTo(W2X(P.x[i]), W2Y(P.z[i]));
+      dctx.strokeStyle = A.lineColors[i];
+      dctx.lineWidth = lineW; dctx.lineCap = "round";
+      dctx.stroke();
+    }
   }
 
   // sector boundary notches
@@ -1695,10 +1859,10 @@ function drawMap() {
       carZ = interp(s.d, pA.z, d);
 
       // Draw active glowing live trail up to current car position
-      const curIdx = Math.max(0, Math.min(Math.floor((d / A.maxD) * s.d.length), s.d.length - 1));
+      const curIdx = lowerIdx(s.d, d);
       if (curIdx > 1) {
         dctx = mctx;
-        pathStroke(A, 0, curIdx, "#22d3ee", 3.5, 0.95);
+        pathStroke(A, 0, curIdx, "#22d3ee", 3.8, 1.0);
         dctx = null;
       }
     } else if (live.x != null && live.z != null) {
@@ -2121,9 +2285,15 @@ function buildStepChart(cfg) {
   }
   // reference lap: thinner, dashed, same level colors (ghost style)
   if (colB) steps(B.samples, colB, off, 1.2, [4, 3], 0.8);
-  if (colA) steps(A.samples, colA, -off, 1.6, [], 1);
+  if (colA) {
+    if (state.liveWatching) {
+      steps(A.samples, colA, 0, 1.2, [3, 2], 0.25); // faint reference benchmark
+    } else {
+      steps(A.samples, colA, -off, 1.6, [], 1);
+    }
+  }
 
-  chartCache[cfg.id] = { img: ctx.getImageData(0, 0, w, h), d0, d1, w, h };
+  chartCache[cfg.id] = { img: ctx.getImageData(0, 0, w, h), d0, d1, w, h, padT, padB };
 }
 
 function drawSectorBands(ctx, lap, X, w, h) {
@@ -2206,11 +2376,15 @@ function buildChart(cfg) {
   // the comparison, so the line must be continuous — thinner and dimmer
   // is what says "the other lap". A pace reference has no channels, so
   // no line: its comparison lives in the DELTA panel and the map badges.
-  if (state.lapB && state.lapB.samples[cfg.col])
+  if (state.lapB && state.lapB.samples && state.lapB.samples[cfg.col])
     trace(state.lapB, "#b9c2d0", 0.75, 1);
-  trace(A, cfg.color || "#22d3ee", 1, 1.5);
+  if (state.liveWatching && A && A.samples && A.samples[cfg.col]) {
+    trace(A, "#475569", 0.45, 1); // faint reference benchmark
+  } else if (!state.liveWatching && A && A.samples && A.samples[cfg.col]) {
+    trace(A, cfg.color || "#22d3ee", 1, 1.5);
+  }
 
-  chartCache[cfg.id] = { img: ctx.getImageData(0, 0, w, h), d0, d1, w, h };
+  chartCache[cfg.id] = { img: ctx.getImageData(0, 0, w, h), d0, d1, w, h, padT, padB, min, max };
 }
 
 function buildDeltaChart() {

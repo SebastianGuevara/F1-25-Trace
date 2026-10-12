@@ -367,6 +367,24 @@ class Recorder(threading.Thread):
             int(st.get("ers_mode") or 0),
         ))
 
+        # Downsample current lap samples to at most ~500 points for progressive chart painting
+        trail = None
+        if samples and len(samples) > 1:
+            step = max(1, len(samples) // 500)
+            sub = samples[::step]
+            if sub[-1] != samples[-1]:
+                sub.append(samples[-1])
+            trail = {
+                "d": [s[1] for s in sub],
+                "spd": [s[5] for s in sub],
+                "thr": [s[6] for s in sub],
+                "brk": [s[7] for s in sub],
+                "str": [s[8] for s in sub],
+                "gear": [s[9] for s in sub],
+                "ers": [int(round(s[18] * 25)) for s in sub],
+                "ersm": [s[20] for s in sub],
+            }
+
         player_name = self._resolve_player_name(idx)
         track_id = self.session_info["track_id"] if self.session_info else None
         self.live_telemetry = {
@@ -387,10 +405,13 @@ class Recorder(threading.Thread):
             "steer": int(round((t.get("steer") or 0.0) * 100)),
             "gear": t.get("gear", 0),
             "rpm": t.get("rpm", 0),
+            "ers": int(round(((st.get("ers_store") or 0.0) / 1e6) * 25)),
+            "ers_mode": int(st.get("ers_mode") or 0),
             "drs": 1 if t.get("drs") else 0,
             "overtake": 1 if t2.get("overtake") else 0,
             "aero": 1 if t2.get("aero_mode") else 0,
             "invalid": bool(buf.invalid),
+            "trail": trail,
             "updated_at": time.time(),
         }
 
