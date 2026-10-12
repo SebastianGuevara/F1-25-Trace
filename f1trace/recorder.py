@@ -132,6 +132,32 @@ class Recorder(threading.Thread):
         self.ghost_bufs = {}       # car_idx -> [(t_ms, dist), ...]
         self.stored_ghost_times = set()  # (role, lap_time_ms) dedupe
 
+    _CTX_ATTRS = (
+        "session_uid", "session_row_id", "session_info", "track_length",
+        "player_idx", "bufs", "motion", "telem", "car_status", "telem2",
+        "setups", "teams", "driver_names", "sess_assists", "pb_idx",
+        "rival_idx", "tt", "ghost_bufs", "stored_ghost_times")
+
+    def _switch_sender(self, addr):
+        """Each sender (IP:port) has its own session/lap state. Without
+        this, two players sending to one server reset each other's
+        session on every packet and no lap ever completes."""
+        if not hasattr(self, "_contexts"):
+            self._contexts = {}
+            self._cur_ctx = None
+        if addr == self._cur_ctx:
+            return
+        if self._cur_ctx is not None:
+            self._contexts[self._cur_ctx] = {
+                a: getattr(self, a) for a in self._CTX_ATTRS}
+        saved = self._contexts.get(addr)
+        if saved is None:
+            self._reset_session_state(None)
+        else:
+            for a, v in saved.items():
+                setattr(self, a, v)
+        self._cur_ctx = addr
+
     def _set_status(self, **kw):
         with self._status_lock:
             self.status.update(kw)
@@ -180,6 +206,7 @@ class Recorder(threading.Thread):
                 data, addr = sock.recvfrom(4096)
                 if addr:
                     self.last_sender_ip = addr[0]
+                    self._switch_sender(addr)
             except socket.timeout:
                 now = time.time()
                 if now - window_start >= 2.0:
