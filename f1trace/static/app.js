@@ -1059,6 +1059,8 @@ function renderLapList() {
     if (state.lapA && lap.id === state.lapA.id) row.classList.add("sel");
     if (state.lapB && lap.id === state.lapB.id) row.classList.add("ref-sel");
     const isRef = state.lapB && lap.id === state.lapB.id;
+    const gap = ranked && i > 0 && lap.lap_time_ms && baseMs
+      ? `<span class="gap">+${((lap.lap_time_ms - baseMs) / 1000).toFixed(3)}</span>` : "";
     function fmtSec(ms) {
       if (!ms || ms <= 0) return "—";
       return (ms / 1000).toFixed(3);
