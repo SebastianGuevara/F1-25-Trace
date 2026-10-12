@@ -1,0 +1,65 @@
+name: Deploy to Oracle Cloud
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Oracle VM via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            echo "==> Starting deployment..."
+            mkdir -p /home/opc/F1-25-Trace/data
+
+            # 1. Backup existing database so friends' laps are never lost
+            if [ -f /home/opc/F1-25-Trace/data/f1trace.db ]; then
+              cp /home/opc/F1-25-Trace/data/f1trace.db /home/opc/f1trace_backup.db
+            fi
+
+            # 2. Download latest code from GitHub
+            cd /home/opc
+            curl -sL https://github.com/SebastianGuevara/F1-25-Trace/archive/refs/heads/main.tar.gz | tar xz
+            cp -rf F1-25-Trace-main/* F1-25-Trace/
+            rm -rf F1-25-Trace-main
+
+            # 3. Restore database
+            if [ -f /home/opc/f1trace_backup.db ]; then
+              cp -u /home/opc/f1trace_backup.db /home/opc/F1-25-Trace/data/f1trace.db
+            fi
+
+            # 4. Open firewall ports in iptables
+            sudo iptables -I INPUT 1 -p tcp --dport 8020 -j ACCEPT 2>/dev/null || true
+            sudo iptables -I INPUT 1 -p udp --dport 20777 -j ACCEPT 2>/dev/null || true
+
+            # 5. Configure systemd service
+            sudo bash -c 'cat <<EOF > /etc/systemd/system/f1trace.service
+            [Unit]
+            Description=F1 25 Telemetry Recorder & Web Server
+            After=network.target
+
+            [Service]
+            Type=simple
+            User=opc
+            WorkingDirectory=/home/opc/F1-25-Trace
+            ExecStart=/usr/bin/python3 -m f1trace --host 0.0.0.0 --http-port 8020 --udp-port 20777
+            Restart=always
+            RestartSec=5
+
+            [Install]
+            WantedBy=multi-user.target
+            EOF'
+
+            # 6. Stop any stray manual processes and restart systemd service
+            sudo pkill -f "python3 -m f1trace" 2>/dev/null || true
+            sudo systemctl daemon-reload
+            sudo systemctl enable f1trace
+            sudo systemctl restart f1trace
+            sudo systemctl status f1trace --no-pager
+            echo "==> Deployment finished successfully!"
