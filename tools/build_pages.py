@@ -32,8 +32,7 @@ def main():
     shutil.rmtree(out, ignore_errors=True)
     shutil.copytree(os.path.join(ROOT, "f1trace", "static"), out)
 
-    con = sqlite3.connect(os.path.join(ROOT, "f1trace", "demo.db"))
-    con.row_factory = sqlite3.Row
+    con = db.connect(os.path.join(ROOT, "f1trace", "demo.db"))
 
     dump(out, "api/status", {"listening": False, "demo": True,
                              "static": True, "version": __version__})
@@ -56,8 +55,8 @@ def main():
             " l.lap_time_ms, l.s1_ms, l.s2_ms, l.s3_ms, l.valid,"
             " l.tyre_visual, l.top_speed, l.n_samples, l.created_at,"
             " l.assists, l.setup IS NOT NULL AS has_setup, l.team_id,"
-            " l.session_id, s.started_at, s.session_type_name,"
-            " s.packet_format"
+            " l.driver_name, l.session_id, s.started_at, s.session_type_name,"
+            " s.packet_format, s.weather"
             " FROM laps l JOIN sessions s ON s.id = l.session_id"
             " WHERE s.track_id=?"
             " ORDER BY s.id DESC, l.id", (t["track_id"],)).fetchall()
@@ -71,7 +70,7 @@ def main():
 
     for r in con.execute(
             "SELECT l.*, s.track_id, s.track_name, s.track_length,"
-            " s.session_type_name"
+            " s.session_type_name, s.weather"
             " FROM laps l JOIN sessions s ON s.id = l.session_id"):
         meta = {k: r[k] for k in r.keys() if k != "samples"}
         for k in ("setup", "assists"):

@@ -128,24 +128,40 @@ header {
 #sidebar.collapsed > :not(#side-rail) { display: none; }
 #sidebar.collapsed #side-rail { display: flex; }
 #lap-controls {
-  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
-  padding: 0 10px 8px; border-bottom: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 10px 8px;
+  border-bottom: 1px solid var(--line);
 }
-.seg.small button { padding: 4px 8px; font-size: 9px; letter-spacing: 1px; }
+.lap-ctrl-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+.seg.small button { padding: 4px 7px; font-size: 9px; letter-spacing: 1px; }
 .toggle {
   background: none; border: 1px solid var(--line); color: var(--dim);
   font-family: inherit; font-size: 9px; font-weight: 700; font-style: italic;
-  letter-spacing: 1px; border-radius: 7px; padding: 5px 9px; cursor: pointer;
+  letter-spacing: .5px; border-radius: 7px; padding: 4px 8px; cursor: pointer;
+  white-space: nowrap; text-align: center;
 }
 .toggle:hover { border-color: var(--dim); }
 .toggle.on { background: #123a44; border-color: var(--accent); color: var(--accent); }
 .driver-filter-sel {
+  flex: 1; min-width: 0;
   background: var(--card); border: 1px solid var(--line); color: var(--accent);
   font-family: inherit; font-size: 9px; font-weight: 700; font-style: italic;
   letter-spacing: .5px; border-radius: 7px; padding: 4px 6px; cursor: pointer;
-  max-width: 140px; text-overflow: ellipsis; outline: none;
+  text-overflow: ellipsis; outline: none;
 }
 .driver-filter-sel:focus { border-color: var(--accent); }
+#sort-seg { flex: none; }
+#weather-seg { flex: 1.1; }
+#weather-seg button { flex: 1; padding: 4px 5px; }
+#valid-toggle { flex: 1; }
+#asst-toggle { flex: 1.2; }
 .driver-leaderboard {
   border-bottom: 1px solid var(--line); background: rgba(18, 22, 32, 0.7);
   padding: 6px 10px; font-size: 11px;

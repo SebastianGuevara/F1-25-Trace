@@ -43,23 +43,24 @@ if (location.protocol === "file:") {
       <button id="side-toggle" title="collapse the lap list">«</button>
     </div>
     <div id="lap-controls">
-      <div class="seg small" id="sort-seg" title="lap ordering">
-        <button data-sort="recent" class="on">RECENT</button>
-        <button data-sort="fastest">FASTEST</button>
+      <div class="lap-ctrl-row">
+        <select id="driver-select" class="driver-filter-sel" title="Filter laps by driver">
+          <option value="all">ALL DRIVERS</option>
+        </select>
+        <div class="seg small" id="sort-seg" title="Lap ordering">
+          <button data-sort="recent" class="on">RECENT</button>
+          <button data-sort="fastest">FASTEST</button>
+        </div>
       </div>
-      <div class="seg small" id="role-seg" title="whose laps to show — none active = everyone">
-        <button data-role="player">YOU</button>
-        <button data-role="ghost">GHOSTS</button>
+      <div class="lap-ctrl-row">
+        <div class="seg small" id="weather-seg" title="Filter by weather conditions">
+          <button data-weather="all" class="on">ALL</button>
+          <button data-weather="dry">DRY</button>
+          <button data-weather="wet">WET</button>
+        </div>
+        <button id="valid-toggle" class="toggle" title="Only show valid laps (no track limits / corner cuts)">VALID</button>
+        <button id="asst-toggle" class="toggle" title="Only show laps driven with zero assists">NO ASSISTS</button>
       </div>
-      <div class="seg small" id="asst-seg" title="filter by driving assists — none active = all laps (laps recorded before assist capture only match when nothing is selected)">
-        <button data-asst="on">ASSISTS</button>
-        <button data-asst="off">NO ASSISTS</button>
-      </div>
-      <select id="driver-select" class="driver-filter-sel" title="filter laps by driver">
-        <option value="all">ALL DRIVERS</option>
-      </select>
-      <button id="inv-toggle" class="toggle" title="hide laps the game flagged invalid (corner cuts etc.)">HIDE INV</button>
-      <button id="fold-btn" class="toggle" title="collapse / expand all sessions (click a session header for just that one)">FOLD</button>
     </div>
     <div id="driver-leaderboard" class="driver-leaderboard" style="display:none"></div>
     <div id="lap-list"></div>

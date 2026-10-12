@@ -168,7 +168,7 @@ def make_handler(db_path, recorder, demo=False):
                 " l.tyre_visual, l.top_speed, l.n_samples, l.created_at,"
                 " l.assists, l.setup IS NOT NULL AS has_setup, l.team_id,"
                 " l.driver_name, l.session_id, s.started_at, s.session_type_name,"
-                " s.packet_format"
+                " s.packet_format, s.weather"
                 " FROM laps l JOIN sessions s ON s.id = l.session_id"
                 " WHERE s.track_id=?"
                 " ORDER BY s.id DESC, l.id DESC", (track_id,)).fetchall()
@@ -183,7 +183,7 @@ def make_handler(db_path, recorder, demo=False):
         def lap(self, lap_id):
             row = get_con().execute(
                 "SELECT l.*, s.track_id, s.track_name, s.track_length,"
-                " s.session_type_name"
+                " s.session_type_name, s.weather"
                 " FROM laps l JOIN sessions s ON s.id = l.session_id"
                 " WHERE l.id=?", (lap_id,)).fetchone()
             if row is None:

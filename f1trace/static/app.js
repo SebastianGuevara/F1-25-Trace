@@ -16,11 +16,11 @@ const state = {
   mode: "speed",     // racing-line color mode: speed | gap
   mapZoom: null,     // {k, wx, wz}: zoom factor + world-space view centre
   viewD: null,       // [d0, d1] focused distance range (map zoom -> charts)
-  sort: "recent",    // lap list ordering: recent | fastest
-  roleFilter: "all", // all | player | ghost
-  driverFilter: "all", // all | <driver_name>
-  assistFilter: "all", // all | on | off
-  hideInvalid: false,
+  sort: "recent",       // lap list ordering: recent | fastest
+  driverFilter: "all",  // all | <driver_name>
+  weatherFilter: "all", // all | dry | wet
+  validOnly: false,     // only valid laps
+  noAssistsOnly: false, // only zero-assists laps
   setupOpen: false,  // setup/assists panel visible
   timingOpen: true,  // TIMING card expanded (click its tag to fold)
   folded: new Set(), // collapsed session ids in the lap list
@@ -822,10 +822,16 @@ async function selectTrack(id) {
   renderLapList();
 }
 
+const WEATHER_NAMES = {
+  0: "DRY", 1: "DRY", 2: "DRY",
+  3: "WET", 4: "HEAVY WET", 5: "STORM"
+};
+
 function fmtSession(lap) {
   // "2026-07-11T15:19:09" -> "07-11 15:19"
   const at = (lap.started_at || "").slice(5, 16).replace("T", " ");
-  return `${at} · ${lap.session_type_name || "?"} · session #${lap.session_id}`;
+  const wStr = lap.weather != null ? ` · ${WEATHER_NAMES[lap.weather] || (lap.weather >= 3 ? "WET" : "DRY")}` : "";
+  return `${at} · ${lap.session_type_name || "?"}${wStr} · session #${lap.session_id}`;
 }
 
 /* F1 Broadcast aesthetics helpers: Team colors, 3-letter driver codes, tyre graphics */
@@ -984,16 +990,16 @@ function renderDriverLeaderboard(bestOverallId, pbMap) {
 
 function visibleLaps() {
   let laps = state.laps.slice();
-  if (state.roleFilter === "player")
-    laps = laps.filter((l) => l.car_role === "player");
-  else if (state.roleFilter === "ghost")
-    laps = laps.filter((l) => l.car_role !== "player");
   if (state.driverFilter !== "all")
     laps = laps.filter((l) => (l.driver_name || (l.car_role === "player" ? "You" : "")) === state.driverFilter);
-  if (state.assistFilter !== "all")
-    laps = laps.filter((l) =>
-      assistsOn(l.assists) === (state.assistFilter === "on"));
-  if (state.hideInvalid) laps = laps.filter((l) => l.valid);
+  if (state.weatherFilter === "dry")
+    laps = laps.filter((l) => l.weather == null || l.weather <= 2);
+  else if (state.weatherFilter === "wet")
+    laps = laps.filter((l) => l.weather != null && l.weather >= 3);
+  if (state.validOnly)
+    laps = laps.filter((l) => l.valid);
+  if (state.noAssistsOnly)
+    laps = laps.filter((l) => assistsOn(l.assists) === false);
   if (state.sort === "fastest")
     laps.sort((a, b) => (a.lap_time_ms || 1e12) - (b.lap_time_ms || 1e12));
   return laps;
@@ -2410,7 +2416,7 @@ $("export-btn").addEventListener("click", () => {
   a.download = "";
   document.body.appendChild(a); a.click(); a.remove();
 });
-$("sort-seg").addEventListener("click", (e) => {
+$("sort-seg")?.addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (!b || b.dataset.sort === state.sort) return;
   state.sort = b.dataset.sort;
@@ -2418,39 +2424,26 @@ $("sort-seg").addEventListener("click", (e) => {
     x.classList.toggle("on", x === b);
   renderLapList();
 });
-// filter segs have no "ALL" button: clicking the active filter turns it
-// off again (none active = everything shown)
-$("role-seg").addEventListener("click", (e) => {
-  const b = e.target.closest("button");
-  if (!b) return;
-  state.roleFilter = b.dataset.role === state.roleFilter ? "all" : b.dataset.role;
-  for (const x of document.querySelectorAll("#role-seg button"))
-    x.classList.toggle("on", x.dataset.role === state.roleFilter);
-  renderLapList();
-});
 $("driver-select")?.addEventListener("change", (e) => {
   state.driverFilter = e.target.value;
   renderLapList();
 });
-$("asst-seg").addEventListener("click", (e) => {
+$("weather-seg")?.addEventListener("click", (e) => {
   const b = e.target.closest("button");
-  if (!b) return;
-  state.assistFilter = b.dataset.asst === state.assistFilter ? "all" : b.dataset.asst;
-  for (const x of document.querySelectorAll("#asst-seg button"))
-    x.classList.toggle("on", x.dataset.asst === state.assistFilter);
+  if (!b || b.dataset.weather === state.weatherFilter) return;
+  state.weatherFilter = b.dataset.weather;
+  for (const x of document.querySelectorAll("#weather-seg button"))
+    x.classList.toggle("on", x === b);
   renderLapList();
 });
-$("inv-toggle").addEventListener("click", () => {
-  state.hideInvalid = !state.hideInvalid;
-  $("inv-toggle").classList.toggle("on", state.hideInvalid);
+$("valid-toggle")?.addEventListener("click", () => {
+  state.validOnly = !state.validOnly;
+  $("valid-toggle")?.classList.toggle("on", state.validOnly);
   renderLapList();
 });
-$("fold-btn").addEventListener("click", () => {
-  const ids = new Set(state.laps.map((l) => l.session_id));
-  const allFolded = ids.size > 0 &&
-    [...ids].every((id) => state.folded.has(id));
-  state.folded = allFolded ? new Set() : ids;
-  $("fold-btn").classList.toggle("on", !allFolded);
+$("asst-toggle")?.addEventListener("click", () => {
+  state.noAssistsOnly = !state.noAssistsOnly;
+  $("asst-toggle")?.classList.toggle("on", state.noAssistsOnly);
   renderLapList();
 });
 window.addEventListener("keydown", (e) => {
