@@ -1248,6 +1248,7 @@ function updateDriverFilterOptions() {
   const drivers = new Set();
   for (const l of state.laps) {
     if (l.driver_name) drivers.add(l.driver_name);
+    else if (l.car_role === "player") drivers.add("You");
   }
   const sorted = Array.from(drivers).sort((a, b) => a.localeCompare(b));
 

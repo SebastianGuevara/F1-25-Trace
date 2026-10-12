@@ -172,7 +172,7 @@ def make_handler(db_path, recorder, demo=False):
                     renamed_count = 0
                     for r in rows:
                         dname = r["driver_name"]
-                        if not dname or ids.is_f1_driver(dname) or dname.lower() in ("player", f"driver ({cip.lower()})"):
+                        if not dname or ids.is_f1_driver(dname) or str(dname).isdigit() or str(dname).lower() in ("player", f"driver ({cip.lower()})"):
                             c = con.execute("UPDATE laps SET driver_name=? WHERE driver_name=?", (new_name, dname))
                             renamed_count += c.rowcount
                     con.commit()

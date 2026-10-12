@@ -92,18 +92,21 @@ class Recorder(threading.Thread):
             return self.driver_override
         # 1. IP mapping takes precedence (e.g. from Oracle Cloud client or localhost)
         if self.last_sender_ip and self.last_sender_ip in self.ip_to_driver:
-            return self.ip_to_driver[self.last_sender_ip]
+            val = self.ip_to_driver[self.last_sender_ip]
+            if val and not str(val).isdigit():
+                return str(val)
         # 2. If game sent an official F1 / AI driver name (e.g. NORRIS, VERSTAPPEN in local GP)
         if ids.is_f1_driver(raw_name):
             if self.last_sender_ip in ("127.0.0.1", "localhost", None):
                 return self.ip_to_driver.get("127.0.0.1") or self.default_driver or "seb"
             return f"Driver ({self.last_sender_ip})"
         # 3. If game sent a real human gamertag, use it and remember for this IP
-        if raw_name:
+        if isinstance(raw_name, str) and raw_name.strip() and not raw_name.strip().isdigit():
+            clean = raw_name.strip()
             if self.last_sender_ip and self.last_sender_ip not in self.ip_to_driver:
-                self.ip_to_driver[self.last_sender_ip] = raw_name
+                self.ip_to_driver[self.last_sender_ip] = clean
                 self._save_drivers()
-            return raw_name
+            return clean
         return self.ip_to_driver.get("default") or self.default_driver or "seb"
 
     # ---------------------------------------------------------- state
@@ -385,7 +388,7 @@ class Recorder(threading.Thread):
                 "ersm": [s[20] for s in sub],
             }
 
-        player_name = self._resolve_player_name(idx)
+        player_name = self._resolve_player_name(self.driver_names.get(idx))
         track_id = self.session_info["track_id"] if self.session_info else None
         self.live_telemetry = {
             "active": True,
