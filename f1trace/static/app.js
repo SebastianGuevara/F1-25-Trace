@@ -29,6 +29,8 @@ const state = {
   hudSteer: true,    // steering section of the telemetry card visible
   hudPos: null,      // dragged card position {x, y} as stage fractions
   readonly: false,   // static hosting (GitHub Pages demo): nothing to delete
+  liveWatching: false, // live on-track telemetry mode
+  liveCar: null,     // current real-time telemetry frame
 };
 
 /* ---------------------------------------------------------------- color */
@@ -785,6 +787,25 @@ async function pollStatus() {
       gc.textContent = st.ghosts.rival ? "RIVAL PACE ✓" : "PB PACE ✓";
     } else gc.style.display = "none";
 
+    // Live on-track banner handling
+    const banner = $("live-banner");
+    if (banner) {
+      if (st.pps > 0 && st.live) {
+        banner.style.display = "flex";
+        if (!state.liveWatching) {
+          $("live-timer").textContent = fmtTime(st.live.lap_time_ms, 1);
+          $("live-speed").textContent = `${Math.round(st.live.speed || 0)} KM/H`;
+          $("live-lap-num").textContent = `LAP ${st.live.lap_num}`;
+          if (st.live.driver_name) $("live-driver-name").textContent = st.live.driver_name.toUpperCase();
+        }
+      } else {
+        banner.style.display = "none";
+        if (state.liveWatching) {
+          stopLiveWatch();
+        }
+      }
+    }
+
     const stamp = JSON.stringify(st.last_lap);
     if (stamp !== lastLapStamp) {
       lastLapStamp = stamp;
@@ -792,6 +813,80 @@ async function pollStatus() {
     }
   } catch (e) { /* server briefly away; retry next tick */ }
   setTimeout(pollStatus, 2000);
+}
+
+let liveTimer = null;
+
+function stopLiveWatch() {
+  state.liveWatching = false;
+  clearTimeout(liveTimer);
+  state.liveCar = null;
+  const btn = $("live-watch-btn");
+  if (btn) {
+    btn.textContent = "WATCH";
+    btn.classList.remove("watching");
+  }
+  drawMap();
+}
+
+async function toggleLiveWatch() {
+  if (state.liveWatching) {
+    stopLiveWatch();
+    return;
+  }
+  state.liveWatching = true;
+  const btn = $("live-watch-btn");
+  if (btn) {
+    btn.textContent = "WATCHING";
+    btn.classList.add("watching");
+  }
+  if (!state.lapA && state.laps.length) {
+    const first = state.laps[0];
+    if (first) await viewLap(first.id);
+    state.liveWatching = true;
+    if (btn) {
+      btn.textContent = "WATCHING";
+      btn.classList.add("watching");
+    }
+  }
+  liveTick();
+}
+
+async function liveTick() {
+  if (!state.liveWatching) return;
+  try {
+    const live = await api("api/live");
+    if (live && live.active) {
+      state.liveCar = live;
+      if (live.track_id != null && live.track_id !== state.trackId) {
+        const trackSel = $("track-select");
+        if (trackSel && Array.from(trackSel.options).some((o) => parseInt(o.value, 10) === live.track_id)) {
+          trackSel.value = live.track_id;
+          await onTrackChange();
+          state.liveWatching = true;
+          const btn = $("live-watch-btn");
+          if (btn) {
+            btn.textContent = "WATCHING";
+            btn.classList.add("watching");
+          }
+        }
+      }
+
+      $("live-timer").textContent = fmtTime(live.lap_time_ms, 1);
+      $("live-speed").textContent = `${Math.round(live.speed)} KM/H`;
+      $("live-lap-num").textContent = `LAP ${live.lap_num}`;
+      if (live.driver_name) $("live-driver-name").textContent = live.driver_name.toUpperCase();
+
+      setHalo(live.throttle, live.brake, live.speed, live.gear, live.aero, live.overtake, live.steer, live.rpm);
+      $("time-display").textContent = fmtTime(live.lap_time_ms, 1);
+      $("hud-speed").textContent = Math.round(live.speed);
+
+      drawMap();
+    }
+  } catch (e) {}
+  if (state.liveWatching) {
+    liveTimer = setTimeout(liveTick, 100);
+  }
 }
 
 /* ---------------------------------------------------------------- tracks & laps */
@@ -1180,6 +1275,7 @@ function renderLapList() {
 }
 
 async function viewLap(id) {
+  if (state.liveWatching) stopLiveWatch();
   if (window.innerWidth <= 768) closeMobileSidebar();
   await tracksReady;
   const lap = prepLap(await api(`api/laps/${id}`));
@@ -1523,7 +1619,25 @@ function drawMap() {
     mctx.globalAlpha = 1;
   }
 
-  // player dot
+  // live car dot on track
+  if (state.liveWatching && state.liveCar && state.liveCar.x != null && state.liveCar.z != null) {
+    const lx = state.liveCar.x, lz = state.liveCar.z;
+    mctx.beginPath();
+    mctx.arc(W2X(lx), W2Y(lz), rA * 1.25, 0, 7);
+    mctx.fillStyle = "#ef4444";
+    mctx.strokeStyle = "#ffffff"; mctx.lineWidth = 2.5 * dpr;
+    mctx.shadowColor = "#ef4444"; mctx.shadowBlur = 18 * dpr;
+    mctx.fill(); mctx.shadowBlur = 0; mctx.stroke();
+
+    const dName = (state.liveCar.driver_name || "LIVE").toUpperCase();
+    mctx.font = `bold ${Math.round(11 * dpr)}px sans-serif`;
+    mctx.fillStyle = "#ffffff";
+    mctx.textAlign = "center";
+    mctx.fillText(dName, W2X(lx), W2Y(lz) - (12 * dpr));
+    return;
+  }
+
+  // player dot (recorded lap)
   const pA = mapXZ(A);
   const ax = interp(s.t, pA.x, state.t), az = interp(s.t, pA.z, state.t);
   mctx.beginPath();
@@ -2546,6 +2660,13 @@ $("asst-toggle")?.addEventListener("click", () => {
   state.noAssistsOnly = !state.noAssistsOnly;
   $("asst-toggle")?.classList.toggle("on", state.noAssistsOnly);
   renderLapList();
+});
+$("live-watch-btn")?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  toggleLiveWatch();
+});
+$("live-banner")?.addEventListener("click", () => {
+  toggleLiveWatch();
 });
 window.addEventListener("keydown", (e) => {
   if (["SELECT", "INPUT", "BUTTON"].includes(e.target.tagName)) return;

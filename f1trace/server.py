@@ -96,6 +96,10 @@ def make_handler(db_path, recorder, demo=False):
                     if demo:
                         st["demo"] = True
                     return self._json(st)
+                if path == "/api/live":
+                    if recorder:
+                        return self._json(recorder.get_live())
+                    return self._json({"active": False})
                 if path == "/api/tracks":
                     return self.tracks()
                 m = re.fullmatch(r"/api/tracks/(-?\d+)/laps", path)

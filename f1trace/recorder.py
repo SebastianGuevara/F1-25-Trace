@@ -55,6 +55,7 @@ class Recorder(threading.Thread):
             "cars": {},           # tracked car idx -> live buffer stats
         }
         self._status_lock = threading.Lock()
+        self.live_telemetry = {"active": False}
         self._reset_session_state(None)
 
     def _load_drivers(self):
@@ -135,6 +136,15 @@ class Recorder(threading.Thread):
     def get_status(self):
         with self._status_lock:
             return dict(self.status)
+
+    def get_live(self):
+        with self._status_lock:
+            if not self.live_telemetry.get("active"):
+                return {"active": False}
+            if time.time() - self.live_telemetry.get("updated_at", 0) > 3.0:
+                self.live_telemetry["active"] = False
+                return {"active": False}
+            return dict(self.live_telemetry)
 
     def _warn_once(self, msg):
         with self._status_lock:
@@ -357,12 +367,43 @@ class Recorder(threading.Thread):
             int(st.get("ers_mode") or 0),
         ))
 
+        player_name = self._resolve_player_name(idx)
+        track_id = self.session_info["track_id"] if self.session_info else None
+        self.live_telemetry = {
+            "active": True,
+            "track_id": track_id,
+            "track_name": ids.track_name(track_id) if track_id is not None else "Track",
+            "driver_name": player_name,
+            "team_name": ids.team_name(self.teams.get(idx)),
+            "lap_num": cl.lap_num,
+            "lap_time_ms": cl.current_lap_ms,
+            "distance": round(cl.lap_distance, 1),
+            "x": round(m[0], 2),
+            "y": round(m[1], 2),
+            "z": round(m[2], 2),
+            "speed": t.get("speed", 0),
+            "throttle": int(round((t.get("throttle") or 0.0) * 100)),
+            "brake": int(round((t.get("brake") or 0.0) * 100)),
+            "steer": int(round((t.get("steer") or 0.0) * 100)),
+            "gear": t.get("gear", 0),
+            "rpm": t.get("rpm", 0),
+            "drs": 1 if t.get("drs") else 0,
+            "overtake": 1 if t2.get("overtake") else 0,
+            "aero": 1 if t2.get("aero_mode") else 0,
+            "invalid": bool(buf.invalid),
+            "updated_at": time.time(),
+        }
+
         self._set_status(
             live={
                 "lap_num": cl.lap_num,
                 "lap_time_ms": cl.current_lap_ms,
                 "distance": int(cl.lap_distance),
                 "speed": t.get("speed", 0),
+                "driver_name": player_name,
+                "track_id": track_id,
+                "x": round(m[0], 2),
+                "z": round(m[2], 2),
             },
             cars={str(i): {"role": "player", "lap_num": b.lap_num,
                            "samples": len(b.samples)}

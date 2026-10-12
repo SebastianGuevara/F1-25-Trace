@@ -88,6 +88,21 @@ if (location.protocol === "file:") {
         <button id="asst-toggle" class="toggle" title="Only show laps driven with zero assists">NO ASSISTS</button>
       </div>
     </div>
+    <div id="live-banner" class="live-banner" style="display:none">
+      <div class="live-pulse-ring"></div>
+      <div class="live-badge-info">
+        <div class="live-tag-row">
+          <span class="live-pill">🔴 LIVE</span>
+          <span id="live-driver-name" class="live-driver-name">SEB</span>
+        </div>
+        <div class="live-tele-row">
+          <span id="live-lap-num" class="live-lap-num">LAP 1</span>
+          <span id="live-timer" class="live-timer">0:00.000</span>
+          <span id="live-speed" class="live-speed">0 KM/H</span>
+        </div>
+      </div>
+      <button id="live-watch-btn" class="live-watch-btn" title="Watch live lap telemetry in real time">WATCH</button>
+    </div>
     <div id="driver-leaderboard" class="driver-leaderboard" style="display:none"></div>
     <div id="lap-list"></div>
   </aside>
