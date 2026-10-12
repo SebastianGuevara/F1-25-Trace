@@ -1081,3 +1081,7 @@ canvas.chart { flex: 1; min-width: 0; min-height: 0; cursor: crosshair; }
 .modal-hint {
   font-size: 10px; color: #64748b; margin-top: 16px; line-height: 1.4;
 }
+
+.live-banner-list { flex-direction: column; }
+.live-banner { cursor: pointer; }
+.live-banner.watching { box-shadow: inset 3px 0 0 #ef4444; background: linear-gradient(135deg, rgba(239,68,68,0.32) 0%, rgba(18,22,32,0.9) 100%); }

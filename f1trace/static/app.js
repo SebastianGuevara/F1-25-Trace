@@ -787,24 +787,7 @@ async function pollStatus() {
       gc.textContent = st.ghosts.rival ? "RIVAL PACE ✓" : "PB PACE ✓";
     } else gc.style.display = "none";
 
-    // Live on-track banner handling
-    const banner = $("live-banner");
-    if (banner) {
-      if (st.pps > 0 && st.live) {
-        banner.style.display = "flex";
-        if (!state.liveWatching) {
-          $("live-timer").textContent = fmtTime(st.live.lap_time_ms, 1);
-          $("live-speed").textContent = `${Math.round(st.live.speed || 0)} KM/H`;
-          $("live-lap-num").textContent = `LAP ${st.live.lap_num}`;
-          if (st.live.driver_name) $("live-driver-name").textContent = st.live.driver_name.toUpperCase();
-        }
-      } else {
-        banner.style.display = "none";
-        if (state.liveWatching) {
-          stopLiveWatch();
-        }
-      }
-    }
+    // Live banner is driven by liveListLoop() (one row per live player)
 
     const stamp = JSON.stringify(st.last_lap);
     if (stamp !== lastLapStamp) {
@@ -819,51 +802,115 @@ let liveTimer = null;
 
 function stopLiveWatch() {
   state.liveWatching = false;
+  state.liveSender = null;
   clearTimeout(liveTimer);
   state.liveCar = null;
-  const btn = $("live-watch-btn");
-  if (btn) {
-    btn.textContent = "WATCH";
-    btn.classList.remove("watching");
-  }
+  syncLiveRows();
   rebuildScene();
 }
 
 function armLiveUI() {
   state.liveWatching = true;
   state.playing = false;
-  const btn = $("live-watch-btn");
-  if (btn) {
-    btn.textContent = "WATCHING";
-    btn.classList.add("watching");
-  }
+  syncLiveRows();
 }
 
 /* A lap of the current track is needed as the chart/map canvas for live. */
 async function ensureLiveLap() {
+  const sender = state.liveSender;
   if (!state.lapA && state.laps.length) {
     const best = state.laps.filter((l) => l.valid && l.lap_time_ms)
       .sort((a, b) => a.lap_time_ms - b.lap_time_ms)[0] || state.laps[0];
     if (best) await viewLap(best.id);   // this stops live watching...
   }
+  state.liveSender = sender;
   armLiveUI();                           // ...so re-arm it afterwards
   rebuildScene();
 }
 
-async function toggleLiveWatch() {
-  if (state.liveWatching) {
+/* Watch one specific live player (click again to stop). */
+async function toggleLiveWatch(sender) {
+  if (state.liveWatching && state.liveSender === sender) {
     stopLiveWatch();
     return;
   }
+  clearTimeout(liveTimer);
+  state.liveSender = sender;
+  state.liveCar = null;
   await ensureLiveLap();
   if (!state.lapA) showToast("No recorded lap on this track yet: record one lap first so live charts have a canvas");
   liveTick();
 }
 
-async function liveTick() {
-  if (!state.liveWatching) return;
+/* ---- live players list: one independent row per sender currently live ---- */
+const liveRows = new Map();   // sender -> row element
+
+function syncLiveRows() {
+  for (const [sender, row] of liveRows) {
+    const on = state.liveWatching && state.liveSender === sender;
+    row.classList.toggle("watching", on);
+    row.querySelector(".live-watch-btn").textContent = on ? "WATCHING" : "WATCH";
+  }
+}
+
+function renderLivePlayers(players) {
+  const banner = $("live-banner");
+  if (!banner) return;
+  banner.style.display = players.length ? "flex" : "none";
+  const seen = new Set();
+  for (const p of players) {
+    seen.add(p.sender);
+    let row = liveRows.get(p.sender);
+    if (!row) {
+      row = document.createElement("div");
+      row.className = "live-banner";
+      row.style.display = "flex";
+      row.innerHTML = `
+        <div class="live-pulse-ring"></div>
+        <div class="live-badge-info">
+          <div class="live-tag-row">
+            <span class="live-pill">🔴 LIVE</span>
+            <span class="live-driver-name"></span>
+          </div>
+          <div class="live-tele-row">
+            <span class="live-lap-num"></span>
+            <span class="live-timer"></span>
+            <span class="live-speed"></span>
+          </div>
+        </div>
+        <button class="live-watch-btn" title="Watch this player's live telemetry">WATCH</button>`;
+      row.addEventListener("click", () => toggleLiveWatch(p.sender));
+      liveRows.set(p.sender, row);
+      banner.appendChild(row);
+    }
+    row.querySelector(".live-driver-name").textContent = (p.driver_name || "LIVE").toUpperCase();
+    row.querySelector(".live-lap-num").textContent = `LAP ${p.lap_num}`;
+    row.querySelector(".live-timer").textContent = fmtTime(p.lap_time_ms, 1);
+    row.querySelector(".live-speed").textContent = `${Math.round(p.speed || 0)} KM/H`;
+  }
+  for (const [sender, row] of Array.from(liveRows)) {
+    if (!seen.has(sender)) {
+      row.remove();
+      liveRows.delete(sender);
+      if (state.liveSender === sender) stopLiveWatch();
+    }
+  }
+  syncLiveRows();
+}
+
+async function liveListLoop() {
   try {
-    const live = await api("api/live");
+    renderLivePlayers(await api("api/live_all"));
+  } catch (e) { /* server briefly away */ }
+  setTimeout(liveListLoop, 500);
+}
+
+async function liveTick() {
+  if (!state.liveWatching || !state.liveSender) return;
+  const sender = state.liveSender;
+  try {
+    const live = await api("api/live?sender=" + encodeURIComponent(sender));
+    if (state.liveSender !== sender) return;   // switched player meanwhile
     if (live && live.active) {
       state.liveCar = live;
       if (live.track_id != null && live.track_id !== state.trackId) {
@@ -876,11 +923,6 @@ async function liveTick() {
       } else if (!state.lapA && state.laps.length) {
         await ensureLiveLap();
       }
-
-      $("live-timer").textContent = fmtTime(live.lap_time_ms, 1);
-      $("live-speed").textContent = `${Math.round(live.speed)} KM/H`;
-      $("live-lap-num").textContent = `LAP ${live.lap_num}`;
-      if (live.driver_name) $("live-driver-name").textContent = live.driver_name.toUpperCase();
 
       setHalo(live.throttle, live.brake, live.speed, live.gear, live.aero, live.overtake, live.steer, live.rpm);
       $("time-display").textContent = fmtTime(live.lap_time_ms, 1);
@@ -896,7 +938,7 @@ async function liveTick() {
       drawMap();
     }
   } catch (e) {}
-  if (state.liveWatching) {
+  if (state.liveWatching && state.liveSender === sender) {
     liveTimer = setTimeout(liveTick, 75);
   }
 }
@@ -2933,13 +2975,6 @@ $("asst-toggle")?.addEventListener("click", () => {
   $("asst-toggle")?.classList.toggle("on", state.noAssistsOnly);
   renderLapList();
 });
-$("live-watch-btn")?.addEventListener("click", (e) => {
-  e.stopPropagation();
-  toggleLiveWatch();
-});
-$("live-banner")?.addEventListener("click", () => {
-  toggleLiveWatch();
-});
 window.addEventListener("keydown", (e) => {
   if (["SELECT", "INPUT", "BUTTON"].includes(e.target.tagName)) return;
   if (e.code === "Space") { e.preventDefault(); togglePlay(); }
@@ -3162,3 +3197,4 @@ styleSelect($("speed-select"));
 requestAnimationFrame(loop);
 loadTracks(false).catch((e) => showToast("could not load tracks: " + e.message));
 pollStatus();
+liveListLoop();

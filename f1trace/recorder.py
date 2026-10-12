@@ -56,6 +56,7 @@ class Recorder(threading.Thread):
         }
         self._status_lock = threading.Lock()
         self.live_telemetry = {"active": False}
+        self.live_players = {}   # sender "ip:port" -> latest live telemetry
         self._reset_session_state(None)
 
     def _load_drivers(self):
@@ -166,14 +167,37 @@ class Recorder(threading.Thread):
         with self._status_lock:
             return dict(self.status)
 
-    def get_live(self):
+    def _sender_key(self):
+        c = getattr(self, "_cur_ctx", None)
+        return "%s:%s" % (c[0], c[1]) if c else "local"
+
+    def get_live(self, sender=None):
+        """Full live telemetry (with chart trail) of one sender; with no
+        sender, the most recently updated one."""
+        now = time.time()
         with self._status_lock:
-            if not self.live_telemetry.get("active"):
+            cands = [v for v in self.live_players.values()
+                     if now - v.get("updated_at", 0) <= 3.0
+                     and (sender is None or v.get("sender") == sender)]
+            if not cands:
                 return {"active": False}
-            if time.time() - self.live_telemetry.get("updated_at", 0) > 3.0:
-                self.live_telemetry["active"] = False
-                return {"active": False}
-            return dict(self.live_telemetry)
+            return dict(max(cands, key=lambda v: v["updated_at"]))
+
+    def get_live_all(self):
+        """Light summary of every sender currently live (no trail)."""
+        now = time.time()
+        with self._status_lock:
+            for k in [k for k, v in self.live_players.items()
+                      if now - v.get("updated_at", 0) > 10.0]:
+                del self.live_players[k]
+            out = []
+            for v in self.live_players.values():
+                if now - v.get("updated_at", 0) > 3.0:
+                    continue
+                out.append({k: v.get(k) for k in (
+                    "sender", "driver_name", "track_id", "track_name",
+                    "lap_num", "lap_time_ms", "speed", "team_name")})
+            return out
 
     def _warn_once(self, msg):
         with self._status_lock:
@@ -444,6 +468,10 @@ class Recorder(threading.Thread):
             "trail": trail,
             "updated_at": time.time(),
         }
+        sender = self._sender_key()
+        self.live_telemetry["sender"] = sender
+        with self._status_lock:
+            self.live_players[sender] = self.live_telemetry
 
         self._set_status(
             live={

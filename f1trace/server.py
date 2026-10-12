@@ -96,9 +96,14 @@ def make_handler(db_path, recorder, demo=False):
                     if demo:
                         st["demo"] = True
                     return self._json(st)
+                if path == "/api/live_all":
+                    return self._json(recorder.get_live_all() if recorder else [])
                 if path == "/api/live":
                     if recorder:
-                        return self._json(recorder.get_live())
+                        from urllib.parse import parse_qs, urlparse
+                        q = parse_qs(urlparse(self.path).query)
+                        return self._json(recorder.get_live(
+                            (q.get("sender") or [None])[0]))
                     return self._json({"active": False})
                 if path == "/api/tracks":
                     return self.tracks()
