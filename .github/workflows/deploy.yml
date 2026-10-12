@@ -57,8 +57,7 @@ jobs:
             WantedBy=multi-user.target
             EOF'
 
-            # 6. Stop any stray manual processes and restart systemd service
-            sudo pkill -f "python3 -m f1trace" 2>/dev/null || true
+            # 6. Restart systemd service cleanly
             sudo systemctl daemon-reload
             sudo systemctl enable f1trace
             sudo systemctl restart f1trace
