@@ -1059,20 +1059,15 @@ function renderLapList() {
     if (state.lapA && lap.id === state.lapA.id) row.classList.add("sel");
     if (state.lapB && lap.id === state.lapB.id) row.classList.add("ref-sel");
     const isRef = state.lapB && lap.id === state.lapB.id;
-    const gap = ranked && i > 0 && lap.lap_time_ms && baseMs
-      ? `<span class="gap">+${((lap.lap_time_ms - baseMs) / 1000).toFixed(3)}</span>` : "";
-    const team = lap.team_name ? lap.team_name + " · " : "";
-    const driver = lap.driver_name ? `<span class="driver-tag">${escapeHtml(lap.driver_name)}</span> · ` : "";
-    const sub = isPaceRef(lap)
-      ? `${driver}${team}pace — times only`
-      : ranked
-        ? `${driver}${team}${fmtSession(lap).split(" · ")[0]} · L${lap.lap_num}`
-        : `${driver}${team}L${lap.lap_num}`;
-    if (isPaceRef(lap)) {
-      row.classList.add("pace");
-      row.title = "a ghost's pace: lap clock vs distance and sector times" +
-        " — no telemetry to view, so clicking compares against it";
+    function fmtSec(ms) {
+      if (!ms || ms <= 0) return "—";
+      return (ms / 1000).toFixed(3);
     }
+    const sectorsHtml = (lap.s1_ms && lap.s2_ms && lap.s3_ms)
+      ? `<span class="sec-item"><b class="s1">S1</b> ${fmtSec(lap.s1_ms)}</span>` +
+        `<span class="sec-item"><b class="s2">S2</b> ${fmtSec(lap.s2_ms)}</span>` +
+        `<span class="sec-item"><b class="s3">S3</b> ${fmtSec(lap.s3_ms)}</span>`
+      : `<span class="sec-item">${lap.team_name || "L" + lap.lap_num}</span>`;
 
     let badgeTag = "";
     if (lap.id === bestOverallId) {
@@ -1085,14 +1080,19 @@ function renderLapList() {
       ${ranked ? `<span class="rank">${i + 1}</span>` : ""}
       ${roleBadge(lap)}
       <div class="lap-main">
-        <div class="lap-time">${fmtTime(lap.lap_time_ms, 1)} ${gap}
-          ${badgeTag}
-          ${lap.valid ? "" : '<span class="inv">INV</span>'}</div>
-        <div class="lap-sub">${sub}</div>
-      </div>
-      <button class="refbtn ${isRef ? "on" : ""}"
-        title="${isRef ? "stop comparing against this lap" : "compare the viewed lap against this one"}">VS</button>
-      ${state.readonly ? "" : '<button class="del" title="delete lap">✕</button>'}`;
+        <div class="lap-top">
+          <div class="lap-time">${fmtTime(lap.lap_time_ms, 1)} ${gap}
+            ${badgeTag}
+            ${lap.valid ? "" : '<span class="inv">INV</span>'}
+          </div>
+          <div class="lap-actions">
+            <button class="refbtn ${isRef ? "on" : ""}"
+              title="${isRef ? "stop comparing against this lap" : "compare the viewed lap against this one"}">VS</button>
+            ${state.readonly ? "" : '<button class="del" title="delete lap">✕</button>'}
+          </div>
+        </div>
+        <div class="lap-sub">${sectorsHtml}</div>
+      </div>`;
     row.addEventListener("click", () =>
       isPaceRef(lap) ? toggleRef(lap.id) : viewLap(lap.id));
     row.querySelector(".refbtn").addEventListener("click", (e) => {
