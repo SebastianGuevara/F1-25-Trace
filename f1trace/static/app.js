@@ -1196,6 +1196,7 @@ function tyreBadge(tyreVisual) {
 }
 
 function roleBadge(lap) {
+  if (!lap) return "";
   if (isPaceRef(lap)) {
     const label = lap.car_role === "rival" ? "RIVAL" : "PB·G";
     return `<span class="badge ${lap.car_role}">${label}</span>`;
@@ -1214,7 +1215,7 @@ function roleBadge(lap) {
    (and TimeTrial-packet sector times), none of the fabricated channels.
    They can be compared against, not viewed. */
 function isPaceRef(lap) {
-  return lap.car_role === "pb_ghost" || lap.car_role === "rival";
+  return lap ? (lap.car_role === "pb_ghost" || lap.car_role === "rival") : false;
 }
 
 /* Any driving aid active? true / false / null (not recorded, older laps). */
@@ -1225,7 +1226,8 @@ function assistsOn(a) {
 }
 
 function driverLabel(lap) {
-  return lap.driver_name || (lap.car_role === "player" ? "You" : lap.car_role);
+  if (!lap) return "";
+  return lap.driver_name || (lap.car_role === "player" ? "You" : lap.car_role || "");
 }
 
 function updateDriverFilterOptions() {
@@ -2520,8 +2522,8 @@ function rebuildScene() {
   $("empty-hint").style.display = has ? "none" : "";
   $("map-toolbar").style.display = has ? "" : "none";
   $("sector-card").style.display = has ? "" : "none";
-  const nameA = state.lapA.driver_name || state.lapA.car_role;
-  const nameB = state.lapB ? (state.lapB.driver_name || state.lapB.car_role) : "";
+  const nameA = has ? (state.lapA.driver_name || state.lapA.car_role || "You") : "";
+  const nameB = (has && state.lapB) ? (state.lapB.driver_name || state.lapB.car_role || "") : "";
   $("map-legend").innerHTML = has
     ? `<span class="k kA">${fmtTime(state.lapA.lap_time_ms, 1)} (${escapeHtml(nameA)})</span>` +
       (state.lapB ? `<span class="k kB">${fmtTime(state.lapB.lap_time_ms, 1)} (${escapeHtml(nameB)}) — reference</span>` : "")
