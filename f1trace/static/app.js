@@ -2604,31 +2604,59 @@ window.addEventListener("unhandledrejection", (e) => showToast(String(e.reason))
 async function initDriverProfile() {
   const btn = $("driver-profile-btn");
   const lbl = $("driver-profile-name");
-  if (!btn || !lbl) return;
+  const modal = $("driver-modal");
+  const form = $("driver-modal-form");
+  const input = $("modal-driver-input");
+
+  let activeDriver = localStorage.getItem("f1trace.myDriver") || null;
+
   try {
     const res = await api("api/driver_profile");
     if (res && res.name) {
-      lbl.textContent = res.name.toUpperCase();
+      activeDriver = res.name;
     }
-  } catch (e) {
-    const saved = localStorage.getItem("f1trace.myDriver");
-    if (saved) lbl.textContent = saved.toUpperCase();
+  } catch (e) {}
+
+  if (activeDriver) {
+    if (lbl) lbl.textContent = activeDriver.toUpperCase();
+    localStorage.setItem("f1trace.myDriver", activeDriver);
+    fetch("api/driver_profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: activeDriver })
+    }).catch(() => {});
+  } else {
+    // First time visitor: mandatory registration before accessing telemetry
+    if (modal) {
+      modal.style.display = "flex";
+      setTimeout(() => input?.focus(), 100);
+    }
   }
-  btn.addEventListener("click", async () => {
-    const current = lbl.textContent || "SEB";
-    const name = prompt("Enter your Driver / Player Name (Gamertag):\nThis ensures your laps always appear with your real name, never as the F1 AI car driver.", current);
-    if (!name || !name.trim()) return;
-    const clean = name.trim();
-    lbl.textContent = clean.toUpperCase();
-    localStorage.setItem("f1trace.myDriver", clean);
+
+  form?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const val = (input?.value || "").trim();
+    if (!val) return;
+    activeDriver = val;
+    if (lbl) lbl.textContent = val.toUpperCase();
+    localStorage.setItem("f1trace.myDriver", val);
+    if (modal) modal.style.display = "none";
     try {
       await fetch("api/driver_profile", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: clean })
+        body: JSON.stringify({ name: val })
       });
       await loadTracks(true);
-    } catch (e) {}
+    } catch (err) {}
+  });
+
+  btn?.addEventListener("click", () => {
+    if (input) input.value = lbl?.textContent || "";
+    if (modal) {
+      modal.style.display = "flex";
+      setTimeout(() => input?.focus(), 100);
+    }
   });
 }
 

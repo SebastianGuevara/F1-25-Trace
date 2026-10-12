@@ -110,11 +110,12 @@ def make_handler(db_path, recorder, demo=False):
                 if path == "/api/driver_profile":
                     cip = self.client_address[0]
                     name = recorder.ip_to_driver.get(cip) if recorder else None
-                    if not name and recorder:
-                        name = recorder.default_driver
+                    if not name and recorder and cip in ("127.0.0.1", "localhost", "::1"):
+                        name = recorder.ip_to_driver.get("127.0.0.1") or recorder.default_driver
                     return self._json({
                         "ip": cip,
-                        "name": name or "seb",
+                        "name": name,
+                        "registered": bool(name),
                         "mappings": recorder.ip_to_driver if recorder else {}
                     })
                 return self.static(path)
@@ -167,7 +168,7 @@ def make_handler(db_path, recorder, demo=False):
                     renamed_count = 0
                     for r in rows:
                         dname = r["driver_name"]
-                        if not dname or ids.is_f1_driver(dname) or dname.lower() == "player":
+                        if not dname or ids.is_f1_driver(dname) or dname.lower() in ("player", f"driver ({cip.lower()})"):
                             c = con.execute("UPDATE laps SET driver_name=? WHERE driver_name=?", (new_name, dname))
                             renamed_count += c.rowcount
                     con.commit()

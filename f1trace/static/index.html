@@ -243,7 +243,18 @@ if (location.protocol === "file:") {
   </main>
 </div>
 
-<div id="drop-veil" style="display:none"><div>DROP TO IMPORT LAP</div></div>
+<div id="driver-modal" class="driver-modal" style="display:none">
+  <div class="driver-modal-card">
+    <div class="card-tag">F1 TRACE // REGISTRO</div>
+    <h2>IDENTIFÍCATE PARA ACCEDER</h2>
+    <p>Ingresa tu nombre o gamertag para acceder a las gráficas y registrar tus vueltas:</p>
+    <form id="driver-modal-form">
+      <input type="text" id="modal-driver-input" placeholder="TU NOMBRE (EJ: PABLO, SEB, DAP...)" maxlength="20" required autocomplete="off" />
+      <button type="submit" id="modal-driver-submit" class="driver-submit-btn">INGRESAR A PISTA 🏁</button>
+    </form>
+    <div class="modal-hint">Tus vueltas siempre quedarán registradas con este nombre, aunque uses el coche de Norris, Verstappen o Colapinto en GP local.</div>
+  </div>
+</div>
 
 <script src="app.js"></script>
 </body>

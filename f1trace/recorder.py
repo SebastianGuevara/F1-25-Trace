@@ -94,7 +94,9 @@ class Recorder(threading.Thread):
             return self.ip_to_driver[self.last_sender_ip]
         # 2. If game sent an official F1 / AI driver name (e.g. NORRIS, VERSTAPPEN in local GP)
         if ids.is_f1_driver(raw_name):
-            return self.ip_to_driver.get("default") or self.default_driver or "seb"
+            if self.last_sender_ip in ("127.0.0.1", "localhost", None):
+                return self.ip_to_driver.get("127.0.0.1") or self.default_driver or "seb"
+            return f"Driver ({self.last_sender_ip})"
         # 3. If game sent a real human gamertag, use it and remember for this IP
         if raw_name:
             if self.last_sender_ip and self.last_sender_ip not in self.ip_to_driver:
