@@ -68,28 +68,9 @@ def _migrate(con):
 
 
 def _strip_ghost_channels(con):
-    """Ghost laps are times-only pace references since 0.1.4. Laps stored
-    by the 0.1.x full-telemetry ghost capture carry fabricated channels
-    (placeholder-poisoned inputs, derived speed) — strip them down to the
-    genuine time-at-distance series. Idempotent: converted laps have only
-    t and d left, so they are skipped on later runs."""
-    rows = con.execute(
-        "SELECT id, samples FROM laps"
-        " WHERE car_role IN ('pb_ghost', 'rival') AND samples IS NOT NULL"
-    ).fetchall()
-    for row in rows:
-        try:
-            s = unpack_samples(row["samples"])
-        except Exception:
-            continue
-        if set(s) <= {"t", "d"}:
-            continue
-        kept = {"t": s["t"], "d": s["d"]}
-        con.execute(
-            "UPDATE laps SET samples=?, top_speed=NULL, setup=NULL"
-            " WHERE id=?", (pack_samples(kept), row["id"]))
-        print("[f1trace] converted ghost lap %d to a times-only"
-              " pace reference" % row["id"])
+    """Purge ghost and rival laps so they are never kept or displayed."""
+    con.execute("DELETE FROM laps WHERE car_role IN ('pb_ghost', 'rival')")
+    con.commit()
 
 
 def pack_samples(columns):

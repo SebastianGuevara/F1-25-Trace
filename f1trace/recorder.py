@@ -365,29 +365,10 @@ class Recorder(threading.Thread):
     # ------------------------------------------------- ghost pace reference
 
     def _ghost_sample(self, idx, cl):
-        """Collect the ghost's (lap clock, lapDistance) pair — the two
-        channels genuine in every session. Nothing else of the shadow
-        car's broadcast is read."""
-        if cl is None:
-            return
-        buf = self.ghost_bufs.get(idx)
-        if buf is None:
-            buf = self.ghost_bufs[idx] = []
-        if cl.lap_distance < 0 or cl.current_lap_ms <= 0:
-            return
-        if buf:
-            lt, ld = buf[-1]
-            if cl.current_lap_ms == lt:
-                return  # duplicate frame
-            if cl.current_lap_ms < lt or cl.lap_distance < ld - 1.0:
-                # ghosts don't flashback: a clock or distance rewind is
-                # the ghost restarting its loop at the line (lap_num
-                # never increments)
-                self._finalize_ghost(idx, buf, cl.last_lap_ms or lt)
-                buf = self.ghost_bufs[idx] = []
-        buf.append((cl.current_lap_ms, round(cl.lap_distance, 1)))
+        return  # Omit ghost laps completely
 
     def _finalize_ghost(self, idx, buf, lap_time_ms):
+        return  # Omit ghost laps completely
         role = "pb_ghost" if idx == self.pb_idx else "rival"
         if lap_time_ms <= 0 or self.session_row_id is None:
             return

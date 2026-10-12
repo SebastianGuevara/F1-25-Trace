@@ -199,6 +199,7 @@ def make_handler(db_path, recorder, demo=False):
                 "     THEN l.lap_time_ms END) AS best_ms,"
                 " MAX(s.started_at) AS last_at"
                 " FROM sessions s JOIN laps l ON l.session_id = s.id"
+                " WHERE l.car_role NOT IN ('pb_ghost', 'rival')"
                 " GROUP BY s.track_id ORDER BY last_at DESC").fetchall()
             self._json([dict(r) for r in rows])
 
@@ -211,7 +212,7 @@ def make_handler(db_path, recorder, demo=False):
                 " l.driver_name, l.session_id, s.started_at, s.session_type_name,"
                 " s.packet_format, s.weather"
                 " FROM laps l JOIN sessions s ON s.id = l.session_id"
-                " WHERE s.track_id=?"
+                " WHERE s.track_id=? AND l.car_role NOT IN ('pb_ghost', 'rival')"
                 " ORDER BY s.id DESC, l.id DESC", (track_id,)).fetchall()
             out = []
             for r in rows:

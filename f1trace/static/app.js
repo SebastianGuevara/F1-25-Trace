@@ -990,6 +990,7 @@ function renderDriverLeaderboard(bestOverallId, pbMap) {
 
 function visibleLaps() {
   let laps = state.laps.slice();
+  laps = laps.filter((l) => !isPaceRef(l));
   if (state.driverFilter !== "all")
     laps = laps.filter((l) => (l.driver_name || (l.car_role === "player" ? "You" : "")) === state.driverFilter);
   if (state.weatherFilter === "dry")
@@ -1015,7 +1016,7 @@ function renderLapList() {
   }
 
   // Calculate track record (overall best) and personal best per driver
-  const validLaps = state.laps.filter((l) => l.valid && l.lap_time_ms);
+  const validLaps = state.laps.filter((l) => l.valid && l.lap_time_ms && !isPaceRef(l));
   const bestOverall = validLaps.length
     ? validLaps.reduce((best, l) => l.lap_time_ms < best.lap_time_ms ? l : best, validLaps[0])
     : null;
