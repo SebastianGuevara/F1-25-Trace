@@ -829,22 +829,34 @@ function stopLiveWatch() {
   rebuildScene();
 }
 
-async function toggleLiveWatch() {
-  if (state.liveWatching) {
-    stopLiveWatch();
-    return;
-  }
+function armLiveUI() {
   state.liveWatching = true;
+  state.playing = false;
   const btn = $("live-watch-btn");
   if (btn) {
     btn.textContent = "WATCHING";
     btn.classList.add("watching");
   }
+}
+
+/* A lap of the current track is needed as the chart/map canvas for live. */
+async function ensureLiveLap() {
   if (!state.lapA && state.laps.length) {
-    const first = state.laps[0];
-    if (first) await viewLap(first.id);
+    const best = state.laps.filter((l) => l.valid && l.lap_time_ms)
+      .sort((a, b) => a.lap_time_ms - b.lap_time_ms)[0] || state.laps[0];
+    if (best) await viewLap(best.id);   // this stops live watching...
   }
+  armLiveUI();                           // ...so re-arm it afterwards
   rebuildScene();
+}
+
+async function toggleLiveWatch() {
+  if (state.liveWatching) {
+    stopLiveWatch();
+    return;
+  }
+  await ensureLiveLap();
+  if (!state.lapA) showToast("No recorded lap on this track yet: record one lap first so live charts have a canvas");
   liveTick();
 }
 
@@ -859,13 +871,10 @@ async function liveTick() {
         if (trackSel && Array.from(trackSel.options).some((o) => parseInt(o.value, 10) === live.track_id)) {
           trackSel.value = live.track_id;
           await onTrackChange();
-          state.liveWatching = true;
-          const btn = $("live-watch-btn");
-          if (btn) {
-            btn.textContent = "WATCHING";
-            btn.classList.add("watching");
-          }
+          await ensureLiveLap();
         }
+      } else if (!state.lapA && state.laps.length) {
+        await ensureLiveLap();
       }
 
       $("live-timer").textContent = fmtTime(live.lap_time_ms, 1);
@@ -2805,7 +2814,7 @@ function loop(now) {
   // clamp: rAF throttling in background tabs must not cause time jumps
   const dt = Math.min(100, now - (state.lastFrame || now));
   state.lastFrame = now;
-  if (!state.playing || !state.lapA) return;
+  if (!state.playing || !state.lapA || state.liveWatching) return;
   state.t += dt * state.speed;
   if (state.t >= state.lapA.duration) {
     state.t = state.lapA.duration;
