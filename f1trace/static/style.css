@@ -634,3 +634,216 @@ canvas.chart { flex: 1; min-width: 0; min-height: 0; cursor: crosshair; }
 }
 #empty-hint h2 { color: var(--text); font-size: 20px; }
 #empty-hint p { max-width: 480px; font-size: 13px; }
+
+/* ================================================================
+   RESPONSIVE DESIGN (Tablets & Mobile Devices)
+   ================================================================ */
+
+.mobile-laps-btn { display: none; }
+.sidebar-backdrop { display: none; }
+
+@media (max-width: 900px) {
+  #sector-card {
+    font-size: 11px;
+    padding: 6px 10px;
+  }
+  #status-detail {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  /* Header */
+  header {
+    padding: 8px 10px;
+    gap: 8px;
+  }
+  .brand {
+    font-size: 14px;
+    letter-spacing: 1px;
+  }
+  .mobile-laps-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: #14202b;
+    border: 1px solid #2c4a56;
+    color: var(--accent);
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 800;
+    font-style: italic;
+    letter-spacing: 1px;
+    border-radius: 6px;
+    padding: 5px 9px;
+    cursor: pointer;
+    line-height: 1;
+    transition: all 0.15s ease;
+  }
+  .mobile-laps-btn:active {
+    background: #123a44;
+    border-color: var(--accent);
+  }
+  #status-chip, #pace-chip {
+    font-size: 9px;
+    padding: 3px 6px;
+    letter-spacing: 1px;
+  }
+  #track-select {
+    max-width: 155px;
+    font-size: 11px;
+  }
+
+  /* Backdrop for off-canvas drawer */
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.65);
+    z-index: 90;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+  }
+  .sidebar-backdrop.active {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* Off-canvas mobile sidebar drawer */
+  #sidebar {
+    position: fixed;
+    top: 48px;
+    bottom: 0;
+    left: 0;
+    width: 320px;
+    max-width: 85vw;
+    z-index: 100;
+    box-shadow: 6px 0 24px rgba(0, 0, 0, 0.8);
+    transform: translateX(-100%);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    background: var(--panel);
+  }
+  #sidebar.mobile-open {
+    transform: translateX(0);
+  }
+  #side-rail {
+    display: none !important;
+  }
+  #sidebar.collapsed {
+    width: 320px;
+  }
+  #sidebar.collapsed > :not(#side-rail) {
+    display: flex !important;
+  }
+
+  /* Stage & Floating HUD */
+  #stage {
+    min-height: 180px;
+  }
+  #hud {
+    width: 220px;
+    right: 8px;
+    bottom: 8px;
+    padding: 10px 12px 6px;
+  }
+  #hud.closed {
+    width: 110px;
+  }
+  #sector-card {
+    right: 8px;
+    top: 8px;
+    max-width: calc(100vw - 16px);
+  }
+  #map-toolbar {
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  #color-legend {
+    padding: 4px 7px;
+  }
+  #leg-bar {
+    width: 60px;
+  }
+
+  /* Splitter & Charts */
+  #splitter {
+    height: 12px;
+  }
+  #splitter::after {
+    height: 4px;
+    width: 50px;
+    top: 4px;
+  }
+  #charts {
+    padding: 2px 8px 8px;
+  }
+  .chart-row {
+    gap: 5px;
+    margin-top: 3px;
+  }
+  .chart-row label {
+    width: 55px;
+    font-size: 8px;
+    letter-spacing: 0.5px;
+    padding-top: 2px;
+  }
+  .cv {
+    width: 52px;
+    font-size: 10px;
+    gap: 0;
+  }
+
+  /* Transport bar */
+  #transport {
+    padding: 6px 8px;
+    gap: 6px;
+  }
+  #btn-play {
+    width: 36px;
+    height: 32px;
+    font-size: 15px;
+  }
+  #time-display {
+    width: 58px;
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 480px) {
+  .brand b {
+    padding: 1px 4px;
+  }
+  .brand span {
+    display: none;
+  }
+  #track-select {
+    max-width: 130px;
+    font-size: 10px;
+  }
+  .chart-row label {
+    width: 44px;
+    font-size: 7.5px;
+    letter-spacing: 0;
+  }
+  .cv {
+    width: 44px;
+    font-size: 9px;
+  }
+  #time-display {
+    width: 52px;
+    font-size: 12px;
+  }
+  #transport .dd {
+    width: 48px;
+  }
+  #transport .dd-btn {
+    padding: 5px 4px;
+    font-size: 10px;
+  }
+}

@@ -22,6 +22,7 @@ if (location.protocol === "file:") {
 </head>
 <body>
 <header>
+  <button id="mobile-laps-btn" class="mobile-laps-btn" title="Toggle lap list">🏁 LAPS</button>
   <div class="brand" id="brand"><b>F1</b><span>TRACE</span></div>
   <div id="status-chip" class="chip idle">IDLE</div>
   <div id="pace-chip" class="chip live" style="display:none"
@@ -32,6 +33,7 @@ if (location.protocol === "file:") {
 </header>
 
 <div id="layout">
+  <div id="sidebar-backdrop" class="sidebar-backdrop"></div>
   <aside id="sidebar">
     <div id="side-rail" title="expand the lap list">
       <span class="rail-arrow">»</span>

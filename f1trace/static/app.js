@@ -1110,6 +1110,7 @@ function renderLapList() {
 }
 
 async function viewLap(id) {
+  if (window.innerWidth <= 768) closeMobileSidebar();
   await tracksReady;
   const lap = prepLap(await api(`api/laps/${id}`));
   if (!lap.samples.spd) {   // times-only (pace ref, or an imported one):
@@ -2452,6 +2453,20 @@ window.addEventListener("keydown", (e) => {
   if (e.code === "ArrowRight") seek(state.t + (e.shiftKey ? 5000 : 1000));
   if (e.code === "ArrowLeft") seek(state.t - (e.shiftKey ? 5000 : 1000));
 });
+function closeMobileSidebar() {
+  $("sidebar")?.classList.remove("mobile-open");
+  $("sidebar-backdrop")?.classList.remove("active");
+}
+function openMobileSidebar() {
+  $("sidebar")?.classList.add("mobile-open");
+  $("sidebar-backdrop")?.classList.add("active");
+}
+$("mobile-laps-btn")?.addEventListener("click", () => {
+  if ($("sidebar")?.classList.contains("mobile-open")) closeMobileSidebar();
+  else openMobileSidebar();
+});
+$("sidebar-backdrop")?.addEventListener("click", closeMobileSidebar);
+
 /* Collapse the whole lap tray to a thin rail; remembered. */
 {
   const setSide = (collapsed) => {
@@ -2460,18 +2475,24 @@ window.addEventListener("keydown", (e) => {
     catch (e) { /* private mode */ }
     if (state.lapA) rebuildScene();   // stage width changed
   };
-  $("side-toggle").addEventListener("click", () => setSide(true));
+  $("side-toggle").addEventListener("click", () => {
+    if (window.innerWidth <= 768) closeMobileSidebar();
+    else setSide(true);
+  });
   $("side-rail").addEventListener("click", () => setSide(false));
-  if (localStorage.getItem("f1trace.side") === "1") setSide(true);
+  if (localStorage.getItem("f1trace.side") === "1" && window.innerWidth > 768) setSide(true);
 }
 
 /* Floating telemetry card: drag anywhere on the stage; steering section
    can be hidden. Both are remembered. */
 {
   const hud = $("hud"), stage = $("stage");
+  const isMobile = window.innerWidth <= 768;
   try {
     state.hudPos = JSON.parse(localStorage.getItem("f1trace.hudPos"));
-    state.hudOpen = localStorage.getItem("f1trace.hudOpen") !== "0";
+    state.hudOpen = localStorage.getItem("f1trace.hudOpen") !== null
+      ? localStorage.getItem("f1trace.hudOpen") !== "0"
+      : !isMobile;
     state.hudSteer = localStorage.getItem("f1trace.hudSteer") !== "0";
     state.timingOpen = localStorage.getItem("f1trace.timingOpen") !== "0";
   } catch (e) { /* defaults */ }
@@ -2553,7 +2574,10 @@ window.addEventListener("keydown", (e) => {
   sp.addEventListener("pointercancel", stop);
 }
 
-window.addEventListener("resize", () => { if (state.lapA) rebuildScene(); });
+window.addEventListener("resize", () => {
+  if (window.innerWidth > 768) closeMobileSidebar();
+  rebuildScene();
+});
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && state.lapA) rebuildScene();
 });
