@@ -49,7 +49,31 @@ def session_type_name(st):
     return SESSION_TYPES.get(st, "Session %d" % st)
 
 
+import re
+
 def team_name(team_id):
     if team_id is None:
         return None
     return TEAMS.get(team_id, "Team %d" % team_id)
+
+
+# Official F1 / real game drivers to filter out when playing local GP / career
+F1_DRIVERS = {
+    "verstappen", "perez", "hamilton", "russell", "leclerc", "sainz",
+    "norris", "piastri", "alonso", "stroll", "gasly", "ocon", "albon",
+    "sargeant", "colapinto", "tsunoda", "ricciardo", "lawson", "bottas",
+    "zhou", "magnussen", "hulkenberg", "bearman", "doohan", "antonelli",
+    "bortoleto", "hadjar", "drugovich", "schumacher", "vettel", "raikkonen",
+    "latifi", "giovinazzi", "kvyat", "grosjean", "mazepin", "de vries",
+    "pourchaire", "vips", "fittipaldi", "ilott", "aitken", "ticktum",
+    "piquet", "prost", "senna", "mansell", "hill", "villeneuve",
+    "hakkinen", "coulthard", "irvine", "barrichello", "montoya", "webber",
+    "massa", "button", "rosberg", "palou", "o'ward"
+}
+
+def is_f1_driver(name):
+    """Return True if name is an official F1 / AI driver rather than a human gamertag."""
+    if not name:
+        return False
+    words = re.findall(r"[a-zA-Z]+", str(name).lower())
+    return any(w in F1_DRIVERS for w in words)

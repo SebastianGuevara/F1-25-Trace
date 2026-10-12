@@ -41,6 +41,8 @@ def main():
     ap.add_argument("--demo", action="store_true",
                     help="browse the bundled example laps; no game or "
                          "recording involved")
+    ap.add_argument("--driver", default=None,
+                    help="player / driver name override (e.g. seb) to prevent F1 AI car driver names")
     ap.add_argument("--no-browser", action="store_true",
                     help="don't open the viewer in a browser on startup")
     args = ap.parse_args()
@@ -77,7 +79,8 @@ def main():
 
     rec = None
     if not args.demo:
-        rec = recorder_mod.Recorder(db_path, udp_port=args.udp_port)
+        rec = recorder_mod.Recorder(db_path, udp_port=args.udp_port,
+                                    driver_override=args.driver)
         rec.start()
     try:
         server.serve(db_path, rec, http_port=args.http_port, demo=args.demo,

@@ -2599,9 +2599,43 @@ function showToast(msg) {
 window.addEventListener("error", (e) => showToast(e.message));
 window.addEventListener("unhandledrejection", (e) => showToast(String(e.reason)));
 
+/* ---------------------------------------------------------------- driver profile */
+
+async function initDriverProfile() {
+  const btn = $("driver-profile-btn");
+  const lbl = $("driver-profile-name");
+  if (!btn || !lbl) return;
+  try {
+    const res = await api("api/driver_profile");
+    if (res && res.name) {
+      lbl.textContent = res.name.toUpperCase();
+    }
+  } catch (e) {
+    const saved = localStorage.getItem("f1trace.myDriver");
+    if (saved) lbl.textContent = saved.toUpperCase();
+  }
+  btn.addEventListener("click", async () => {
+    const current = lbl.textContent || "SEB";
+    const name = prompt("Enter your Driver / Player Name (Gamertag):\nThis ensures your laps always appear with your real name, never as the F1 AI car driver.", current);
+    if (!name || !name.trim()) return;
+    const clean = name.trim();
+    lbl.textContent = clean.toUpperCase();
+    localStorage.setItem("f1trace.myDriver", clean);
+    try {
+      await fetch("api/driver_profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: clean })
+      });
+      await loadTracks(true);
+    } catch (e) {}
+  });
+}
+
 /* ---------------------------------------------------------------- boot */
 
 initHalo();
+initDriverProfile();
 styleSelect($("track-select"));
 styleSelect($("speed-select"));
 requestAnimationFrame(loop);

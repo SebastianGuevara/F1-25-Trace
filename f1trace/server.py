@@ -107,6 +107,16 @@ def make_handler(db_path, recorder, demo=False):
                 m = re.fullmatch(r"/api/laps/(\d+)", path)
                 if m:
                     return self.lap(int(m.group(1)))
+                if path == "/api/driver_profile":
+                    cip = self.client_address[0]
+                    name = recorder.ip_to_driver.get(cip) if recorder else None
+                    if not name and recorder:
+                        name = recorder.default_driver
+                    return self._json({
+                        "ip": cip,
+                        "name": name or "seb",
+                        "mappings": recorder.ip_to_driver if recorder else {}
+                    })
                 return self.static(path)
             except BrokenPipeError:
                 pass
@@ -143,6 +153,36 @@ def make_handler(db_path, recorder, demo=False):
                     if not 0 < n <= 32 * 1024 * 1024:
                         return self._json({"error": "file too large"}, 413)
                     return self.import_trace(self.rfile.read(n))
+                if path == "/api/driver_profile":
+                    n = int(self.headers.get("Content-Length") or 0)
+                    body = json.loads(self.rfile.read(n).decode("utf-8")) if n else {}
+                    new_name = str(body.get("name") or "").strip()
+                    if not new_name:
+                        return self._json({"error": "name required"}, 400)
+                    cip = body.get("ip") or self.client_address[0]
+                    if recorder:
+                        recorder.set_driver_for_ip(cip, new_name)
+                    con = get_con()
+                    rows = con.execute("SELECT DISTINCT driver_name FROM laps").fetchall()
+                    renamed_count = 0
+                    for r in rows:
+                        dname = r["driver_name"]
+                        if not dname or ids.is_f1_driver(dname) or dname.lower() == "player":
+                            c = con.execute("UPDATE laps SET driver_name=? WHERE driver_name=?", (new_name, dname))
+                            renamed_count += c.rowcount
+                    con.commit()
+                    return self._json({"ok": True, "name": new_name, "renamed": renamed_count})
+                if path == "/api/rename_driver":
+                    n = int(self.headers.get("Content-Length") or 0)
+                    body = json.loads(self.rfile.read(n).decode("utf-8")) if n else {}
+                    old_name = str(body.get("old_name") or "").strip()
+                    new_name = str(body.get("new_name") or "").strip()
+                    if not old_name or not new_name:
+                        return self._json({"error": "old_name and new_name required"}, 400)
+                    con = get_con()
+                    c = con.execute("UPDATE laps SET driver_name=? WHERE driver_name=?", (new_name, old_name))
+                    con.commit()
+                    return self._json({"ok": True, "renamed": c.rowcount})
                 self._json({"error": "not found"}, 404)
             except BrokenPipeError:
                 pass

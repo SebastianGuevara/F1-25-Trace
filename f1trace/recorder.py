@@ -14,6 +14,7 @@ telemetry; most of it was fabricated — docs/design-notes.md.)
 
 import datetime
 import json
+import os
 import socket
 import threading
 import time
@@ -37,10 +38,15 @@ class LapBuffer:
 
 
 class Recorder(threading.Thread):
-    def __init__(self, db_path, udp_port=20777):
+    def __init__(self, db_path, udp_port=20777, driver_override=None):
         super().__init__(daemon=True, name="f1trace-recorder")
         self.db_path = db_path
         self.udp_port = udp_port
+        self.driver_override = driver_override
+        self.last_sender_ip = None
+        self.drivers_file = os.path.join(os.path.dirname(os.path.abspath(db_path)), "drivers.json")
+        self.ip_to_driver = self._load_drivers()
+        self.default_driver = self.driver_override or self.ip_to_driver.get("default") or "seb"
         self.status = {
             "listening": False, "udp_port": udp_port, "packets": 0, "pps": 0,
             "packet_format": None, "session": None, "live": None,
@@ -50,6 +56,52 @@ class Recorder(threading.Thread):
         }
         self._status_lock = threading.Lock()
         self._reset_session_state(None)
+
+    def _load_drivers(self):
+        try:
+            if os.path.exists(self.drivers_file):
+                with open(self.drivers_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        return data
+        except Exception:
+            pass
+        return {}
+
+    def _save_drivers(self):
+        try:
+            os.makedirs(os.path.dirname(self.drivers_file), exist_ok=True)
+            with open(self.drivers_file, "w", encoding="utf-8") as f:
+                json.dump(self.ip_to_driver, f, indent=2)
+        except Exception:
+            pass
+
+    def set_driver_for_ip(self, ip, name):
+        if not name:
+            return
+        name = name.strip()
+        if ip:
+            self.ip_to_driver[ip] = name
+        self.ip_to_driver["default"] = name
+        self.default_driver = name
+        self._save_drivers()
+
+    def _resolve_player_name(self, raw_name):
+        if self.driver_override:
+            return self.driver_override
+        # 1. IP mapping takes precedence (e.g. from Oracle Cloud client or localhost)
+        if self.last_sender_ip and self.last_sender_ip in self.ip_to_driver:
+            return self.ip_to_driver[self.last_sender_ip]
+        # 2. If game sent an official F1 / AI driver name (e.g. NORRIS, VERSTAPPEN in local GP)
+        if ids.is_f1_driver(raw_name):
+            return self.ip_to_driver.get("default") or self.default_driver or "seb"
+        # 3. If game sent a real human gamertag, use it and remember for this IP
+        if raw_name:
+            if self.last_sender_ip and self.last_sender_ip not in self.ip_to_driver:
+                self.ip_to_driver[self.last_sender_ip] = raw_name
+                self._save_drivers()
+            return raw_name
+        return self.ip_to_driver.get("default") or self.default_driver or "seb"
 
     # ---------------------------------------------------------- state
 
@@ -110,7 +162,9 @@ class Recorder(threading.Thread):
         window_count = 0
         while True:
             try:
-                data, _addr = sock.recvfrom(4096)
+                data, addr = sock.recvfrom(4096)
+                if addr:
+                    self.last_sender_ip = addr[0]
             except socket.timeout:
                 now = time.time()
                 if now - window_start >= 2.0:
@@ -167,6 +221,12 @@ class Recorder(threading.Thread):
             teams, names = packets.parse_participants(data, fmt)
             self.teams.update(teams)
             self.driver_names.update(names)
+            if self.player_idx is not None and self.player_idx in names:
+                raw = names[self.player_idx]
+                if raw and not ids.is_f1_driver(raw) and self.last_sender_ip:
+                    if self.ip_to_driver.get(self.last_sender_ip) != raw:
+                        self.ip_to_driver[self.last_sender_ip] = raw
+                        self._save_drivers()
         elif pid == packets.TIME_TRIAL:
             self.tt = packets.parse_time_trial(data, fmt)
         elif pid == packets.SESSION:
@@ -409,7 +469,8 @@ class Recorder(threading.Thread):
         st = self.car_status.get(idx) or {}
         assists = self._assists_for(st)
         setup = self.setups.get(idx)
-        driver_name = self.driver_names.get(idx)
+        raw_name = self.driver_names.get(idx)
+        driver_name = self._resolve_player_name(raw_name)
         self.con.execute(
             "INSERT INTO laps (session_id, car_role, car_index, lap_num,"
             " lap_time_ms, s1_ms, s2_ms, s3_ms, valid, tyre_visual,"
