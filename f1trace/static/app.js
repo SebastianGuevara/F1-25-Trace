@@ -1093,21 +1093,11 @@ function renderLapList() {
       <div class="lap-actions">
         <button class="refbtn ${isRef ? "on" : ""}"
           title="${isRef ? "stop comparing against this lap" : "compare the viewed lap against this one"}">VS</button>
-        ${state.readonly ? "" : '<button class="del" title="delete lap">✕</button>'}
       </div>`;
     row.addEventListener("click", () =>
       isPaceRef(lap) ? toggleRef(lap.id) : viewLap(lap.id));
     row.querySelector(".refbtn").addEventListener("click", (e) => {
       e.stopPropagation(); toggleRef(lap.id);
-    });
-    row.querySelector(".del")?.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      if (!confirm("Delete this lap?")) return;
-      await api(`api/laps/${lap.id}`, { method: "DELETE" });
-      if (state.lapA && state.lapA.id === lap.id) state.lapA = null;
-      if (state.lapB && state.lapB.id === lap.id) state.lapB = null;
-      await loadTracks(true);
-      rebuildScene();
     });
     box.appendChild(row);
   });
@@ -2462,16 +2452,6 @@ $("fold-btn").addEventListener("click", () => {
   state.folded = allFolded ? new Set() : ids;
   $("fold-btn").classList.toggle("on", !allFolded);
   renderLapList();
-});
-$("inv-del").addEventListener("click", async () => {
-  if (!confirm("Delete ALL invalid laps — every track, every session, " +
-               "not just the ones listed here. This cannot be undone. " +
-               "Continue?")) return;
-  await api("api/laps/invalid", { method: "DELETE" });
-  if (state.lapA && !state.lapA.valid) { state.lapA = null; state.playing = false; }
-  if (state.lapB && !state.lapB.valid) state.lapB = null;
-  await loadTracks(true);
-  rebuildScene();
 });
 window.addEventListener("keydown", (e) => {
   if (["SELECT", "INPUT", "BUTTON"].includes(e.target.tagName)) return;
