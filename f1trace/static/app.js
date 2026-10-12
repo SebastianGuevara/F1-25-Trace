@@ -880,13 +880,78 @@ async function liveTick() {
       setHalo(live.throttle, live.brake, live.speed, live.gear, live.aero, live.overtake, live.steer, live.rpm);
       $("time-display").textContent = fmtTime(live.lap_time_ms, 1);
       $("hud-speed").textContent = Math.round(live.speed);
+      if (state.lapA && state.lapA.maxD) {
+        $("scrub").value = Math.round((Math.min(live.distance, state.lapA.maxD) / scrubMaxD()) * 1000);
+      }
 
+      // Stream charts in real time
+      drawLiveChartCursors(live);
+
+      // Re-draw map locked on track outline
       drawMap();
     }
   } catch (e) {}
   if (state.liveWatching) {
-    liveTimer = setTimeout(liveTick, 100);
+    liveTimer = setTimeout(liveTick, 75);
   }
+}
+
+function drawLiveChartCursors(live) {
+  if (!state.lapA) return;
+  const dLive = live.distance;
+  const dpr = window.devicePixelRatio || 1;
+
+  for (const cfg of charts) {
+    const id = cfg.id;
+    const c = chartCache[id];
+    if (!c) continue;
+    const cv = $(id);
+    const ctx = cv.getContext("2d");
+    ctx.putImageData(c.img, 0, 0);
+
+    if (dLive < c.d0 || dLive > c.d1) continue;
+    const x = ((dLive - c.d0) / (c.d1 - c.d0)) * c.w;
+
+    // Glowing vertical live playhead line
+    ctx.strokeStyle = "#22d3ee";
+    ctx.lineWidth = 2 * dpr;
+    ctx.shadowColor = "#22d3ee";
+    ctx.shadowBlur = 6 * dpr;
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, c.h); ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // Live value marker dot on the curve
+    let val = null;
+    let min = cfg.min != null ? cfg.min : 0;
+    let max = cfg.max != null ? cfg.max : 350;
+    if (cfg.col === "spd") { val = live.speed; max = 360; }
+    else if (cfg.col === "thr") { val = live.throttle; min = 0; max = 100; }
+    else if (cfg.col === "brk") { val = live.brake; min = 0; max = 100; }
+    else if (cfg.col === "str") { val = live.steer; min = -100; max = 100; }
+    else if (cfg.col === "gear") { val = live.gear; min = -1; max = 8; }
+    else if (cfg.col === "ers") { val = live.ers || 50; min = 0; max = 100; }
+
+    if (val != null) {
+      const padT = 3 * dpr, padB = 3 * dpr;
+      const y = padT + (1 - (val - min) / (max - min)) * (c.h - padT - padB);
+      ctx.beginPath();
+      ctx.arc(x, y, 4 * dpr, 0, Math.PI * 2);
+      ctx.fillStyle = cfg.color || "#22d3ee";
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 1.5 * dpr;
+      ctx.shadowColor = cfg.color || "#22d3ee";
+      ctx.shadowBlur = 10 * dpr;
+      ctx.fill(); ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  // Update chart header numbers in real time
+  const spdEl = $("cvA-speed"); if (spdEl) spdEl.textContent = Math.round(live.speed);
+  const thrEl = $("cvA-thr"); if (thrEl) thrEl.textContent = Math.round(live.throttle) + "%";
+  const brkEl = $("cvA-brk"); if (brkEl) brkEl.textContent = Math.round(live.brake) + "%";
+  const strEl = $("cvA-steer"); if (strEl) strEl.textContent = live.steer <= -3 ? "L " + Math.round(-live.steer) : live.steer >= 3 ? "R " + Math.round(live.steer) : "0";
+  const gearEl = $("cvA-gear"); if (gearEl) gearEl.textContent = gearName(live.gear);
 }
 
 /* ---------------------------------------------------------------- tracks & laps */
@@ -1619,22 +1684,43 @@ function drawMap() {
     mctx.globalAlpha = 1;
   }
 
-  // live car dot on track
-  if (state.liveWatching && state.liveCar && state.liveCar.x != null && state.liveCar.z != null) {
-    const lx = state.liveCar.x, lz = state.liveCar.z;
-    mctx.beginPath();
-    mctx.arc(W2X(lx), W2Y(lz), rA * 1.25, 0, 7);
-    mctx.fillStyle = "#ef4444";
-    mctx.strokeStyle = "#ffffff"; mctx.lineWidth = 2.5 * dpr;
-    mctx.shadowColor = "#ef4444"; mctx.shadowBlur = 18 * dpr;
-    mctx.fill(); mctx.shadowBlur = 0; mctx.stroke();
+  // live car dot on track (locked to track centerline / racing line)
+  if (state.liveWatching && state.liveCar) {
+    const live = state.liveCar;
+    let carX = null, carZ = null;
+    if (A && s && s.d && s.d.length) {
+      const pA = mapXZ(A);
+      const d = Math.max(0, Math.min(live.distance || 0, A.maxD));
+      carX = interp(s.d, pA.x, d);
+      carZ = interp(s.d, pA.z, d);
 
-    const dName = (state.liveCar.driver_name || "LIVE").toUpperCase();
-    mctx.font = `bold ${Math.round(11 * dpr)}px sans-serif`;
-    mctx.fillStyle = "#ffffff";
-    mctx.textAlign = "center";
-    mctx.fillText(dName, W2X(lx), W2Y(lz) - (12 * dpr));
-    return;
+      // Draw active glowing live trail up to current car position
+      const curIdx = Math.max(0, Math.min(Math.floor((d / A.maxD) * s.d.length), s.d.length - 1));
+      if (curIdx > 1) {
+        dctx = mctx;
+        pathStroke(A, 0, curIdx, "#22d3ee", 3.5, 0.95);
+        dctx = null;
+      }
+    } else if (live.x != null && live.z != null) {
+      carX = live.x; carZ = live.z;
+    }
+
+    if (carX != null && carZ != null) {
+      const px = W2X(carX), py = W2Y(carZ);
+      mctx.beginPath();
+      mctx.arc(px, py, rA * 1.3, 0, Math.PI * 2);
+      mctx.fillStyle = "#ef4444";
+      mctx.strokeStyle = "#ffffff"; mctx.lineWidth = 2.5 * dpr;
+      mctx.shadowColor = "#ef4444"; mctx.shadowBlur = 18 * dpr;
+      mctx.fill(); mctx.shadowBlur = 0; mctx.stroke();
+
+      const dName = (live.driver_name || "LIVE").toUpperCase();
+      mctx.font = `bold ${Math.round(11 * dpr)}px sans-serif`;
+      mctx.fillStyle = "#ffffff";
+      mctx.textAlign = "center";
+      mctx.fillText(dName, px, py - (12 * dpr));
+      return;
+    }
   }
 
   // player dot (recorded lap)
