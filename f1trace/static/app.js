@@ -17,7 +17,7 @@ const state = {
   mapZoom: null,     // {k, wx, wz}: zoom factor + world-space view centre
   viewD: null,       // [d0, d1] focused distance range (map zoom -> charts)
   sort: "recent",       // lap list ordering: recent | fastest
-  driverFilter: "all",  // all | <driver_name>
+  driverFilter: new Set(),  // Set of selected driver names (empty = all)
   sessionFilter: "all", // all | tt | race | race_mp | race_solo | quali | practice
   weatherFilter: "all", // all | dry | wet
   validOnly: false,     // only valid laps
@@ -920,26 +920,62 @@ function driverLabel(lap) {
 }
 
 function updateDriverFilterOptions() {
-  const sel = $("driver-select");
-  if (!sel) return;
-  const current = state.driverFilter;
+  const container = $("driver-check-list");
+  const labelEl = $("driver-btn-label");
+  const checkAll = $("driver-check-all");
+  if (!container || !labelEl) return;
+
   const drivers = new Set();
   for (const l of state.laps) {
     if (l.driver_name) drivers.add(l.driver_name);
   }
   const sorted = Array.from(drivers).sort((a, b) => a.localeCompare(b));
-  sel.innerHTML = '<option value="all">ALL DRIVERS</option>';
-  for (const d of sorted) {
-    const opt = document.createElement("option");
-    opt.value = d;
-    opt.textContent = d.toUpperCase();
-    sel.appendChild(opt);
+
+  // Prune any driver in driverFilter that no longer exists on this track
+  for (const d of Array.from(state.driverFilter)) {
+    if (!drivers.has(d)) state.driverFilter.delete(d);
   }
-  if (current !== "all" && drivers.has(current)) {
-    sel.value = current;
+
+  // Update button text and check-all checkbox
+  if (state.driverFilter.size === 0 || state.driverFilter.size === sorted.length) {
+    labelEl.textContent = "ALL DRIVERS";
+    if (checkAll) checkAll.checked = true;
+  } else if (state.driverFilter.size === 1) {
+    labelEl.textContent = Array.from(state.driverFilter)[0].toUpperCase();
+    if (checkAll) checkAll.checked = false;
   } else {
-    state.driverFilter = "all";
-    sel.value = "all";
+    const list = Array.from(state.driverFilter).map((d) => d.toUpperCase());
+    labelEl.textContent = list.length <= 2 ? list.join(", ") : `${list[0]} (+${list.length - 1})`;
+    if (checkAll) checkAll.checked = false;
+  }
+
+  container.innerHTML = "";
+  if (sorted.length === 0) {
+    container.innerHTML = '<div style="padding:6px 10px;color:var(--dim)">No drivers</div>';
+    return;
+  }
+
+  for (const d of sorted) {
+    const isChecked = state.driverFilter.size === 0 || state.driverFilter.has(d);
+    const item = document.createElement("label");
+    item.className = "ms-item";
+    item.innerHTML = `
+      <input type="checkbox" value="${escapeHtml(d)}" ${isChecked ? "checked" : ""}>
+      <span>${escapeHtml(d.toUpperCase())}</span>
+    `;
+    item.querySelector("input").addEventListener("change", () => {
+      const allCheckboxes = container.querySelectorAll("input[type='checkbox']");
+      const currentlyChecked = Array.from(allCheckboxes).filter((cb) => cb.checked).map((cb) => cb.value);
+
+      if (currentlyChecked.length === sorted.length || currentlyChecked.length === 0) {
+        state.driverFilter.clear();
+      } else {
+        state.driverFilter = new Set(currentlyChecked);
+      }
+      updateDriverFilterOptions();
+      renderLapList();
+    });
+    container.appendChild(item);
   }
 }
 
@@ -996,8 +1032,8 @@ function renderDriverLeaderboard(bestOverallId, pbMap) {
 function visibleLaps() {
   let laps = state.laps.slice();
   laps = laps.filter((l) => !isPaceRef(l));
-  if (state.driverFilter !== "all")
-    laps = laps.filter((l) => (l.driver_name || (l.car_role === "player" ? "You" : "")) === state.driverFilter);
+  if (state.driverFilter.size > 0)
+    laps = laps.filter((l) => state.driverFilter.has(l.driver_name || (l.car_role === "player" ? "You" : "")));
   if (state.sessionFilter !== "all") {
     laps = laps.filter((l) => {
       const st = l.session_type;
@@ -2459,9 +2495,35 @@ $("sort-seg")?.addEventListener("click", (e) => {
     x.classList.toggle("on", x === b);
   renderLapList();
 });
-$("driver-select")?.addEventListener("change", (e) => {
-  state.driverFilter = e.target.value;
+$("driver-multi-btn")?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const menu = $("driver-dropdown-menu");
+  if (!menu) return;
+  menu.style.display = menu.style.display === "none" ? "block" : "none";
+});
+$("driver-check-all")?.addEventListener("change", (e) => {
+  const isChecked = e.target.checked;
+  const container = $("driver-check-list");
+  if (!container) return;
+  const allCheckboxes = container.querySelectorAll("input[type='checkbox']");
+  for (const cb of allCheckboxes) cb.checked = isChecked;
+
+  state.driverFilter.clear();
+  if (!isChecked) {
+    // If unchecked all, select none by putting a dummy impossible driver or clear
+    // Typically in UI, unchecking "Select All" clears filter or select none.
+    // If user unchecks all, let's keep all laps filtered out:
+    state.driverFilter.add("__NONE__");
+  }
+  updateDriverFilterOptions();
   renderLapList();
+});
+document.addEventListener("click", (e) => {
+  const wrap = $("driver-multi-wrap");
+  const menu = $("driver-dropdown-menu");
+  if (menu && wrap && !wrap.contains(e.target)) {
+    menu.style.display = "none";
+  }
 });
 $("session-select")?.addEventListener("change", (e) => {
   state.sessionFilter = e.target.value;

@@ -47,9 +47,21 @@ if (location.protocol === "file:") {
     </div>
     <div id="lap-controls">
       <div class="lap-ctrl-row">
-        <select id="driver-select" class="driver-filter-sel" title="Filter laps by driver">
-          <option value="all">ALL DRIVERS</option>
-        </select>
+        <div class="multi-select-wrap" id="driver-multi-wrap">
+          <button type="button" id="driver-multi-btn" class="driver-filter-sel" title="Filter laps by drivers">
+            <span id="driver-btn-label">ALL DRIVERS</span>
+            <span class="ms-arrow">▾</span>
+          </button>
+          <div id="driver-dropdown-menu" class="multi-select-menu" style="display:none">
+            <div class="ms-menu-header">
+              <label class="ms-item select-all">
+                <input type="checkbox" id="driver-check-all" checked>
+                <span>SELECT ALL</span>
+              </label>
+            </div>
+            <div id="driver-check-list" class="ms-check-list"></div>
+          </div>
+        </div>
         <select id="session-select" class="session-filter-sel" title="Filter laps by session type / game mode">
           <option value="all">ALL SESSIONS</option>
           <option value="tt">⏱️ TIME TRIAL</option>
