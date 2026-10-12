@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     weather INTEGER,
     air_temp INTEGER,
     track_temp INTEGER,
-    track_length INTEGER
+    track_length INTEGER,
+    network_game INTEGER DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS laps (
     id INTEGER PRIMARY KEY,
@@ -63,6 +64,9 @@ def _migrate(con):
                      ("team_id", "INTEGER"), ("driver_name", "TEXT")):
         if col not in cols:
             con.execute("ALTER TABLE laps ADD COLUMN %s %s" % (col, typ))
+    s_cols = {r[1] for r in con.execute("PRAGMA table_info(sessions)")}
+    if "network_game" not in s_cols:
+        con.execute("ALTER TABLE sessions ADD COLUMN network_game INTEGER DEFAULT 0")
     _strip_ghost_channels(con)
     con.commit()
 

@@ -156,19 +156,20 @@ header {
 }
 .toggle:hover { border-color: var(--dim); }
 .toggle.on { background: #123a44; border-color: var(--accent); color: var(--accent); }
-.driver-filter-sel {
+.driver-filter-sel, .session-filter-sel {
   flex: 1; min-width: 0;
   background: var(--card); border: 1px solid var(--line); color: var(--accent);
   font-family: inherit; font-size: 9px; font-weight: 700; font-style: italic;
   letter-spacing: .5px; border-radius: 7px; padding: 4px 6px; cursor: pointer;
   text-overflow: ellipsis; outline: none;
 }
-.driver-filter-sel:focus { border-color: var(--accent); }
-#sort-seg { flex: none; }
+.driver-filter-sel:focus, .session-filter-sel:focus { border-color: var(--accent); }
+#sort-seg { flex: 1; }
+#sort-seg button { flex: 1; padding: 4px 6px; }
 #weather-seg { flex: 1.1; }
 #weather-seg button { flex: 1; padding: 4px 5px; }
 #valid-toggle { flex: 1; }
-#asst-toggle { flex: 1.2; }
+#asst-toggle { flex: 1; }
 .driver-leaderboard {
   border-bottom: 1px solid var(--line); background: rgba(18, 22, 32, 0.7);
   padding: 6px 10px; font-size: 11px;

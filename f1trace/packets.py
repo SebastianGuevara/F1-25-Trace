@@ -73,10 +73,14 @@ _SESSION_LEAD = struct.Struct("<BbbBHBbB")
 def parse_session(data):
     (weather, track_temp, air_temp, total_laps, track_length,
      session_type, track_id, formula) = _SESSION_LEAD.unpack_from(data, HEADER.size)
+    network_game = 0
+    if len(data) >= HEADER.size + 126:
+        network_game = data[HEADER.size + 125]
     return {
         "weather": weather, "track_temp": track_temp, "air_temp": air_temp,
         "total_laps": total_laps, "track_length": track_length,
         "session_type": session_type, "track_id": track_id, "formula": formula,
+        "network_game": network_game,
     }
 
 

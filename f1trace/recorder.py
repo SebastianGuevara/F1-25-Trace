@@ -248,21 +248,31 @@ class Recorder(threading.Thread):
             cur = self.con.execute(
                 "INSERT INTO sessions (uid, started_at, packet_format, game_year,"
                 " track_id, track_name, session_type, session_type_name,"
-                " weather, air_temp, track_temp, track_length)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                " weather, air_temp, track_temp, track_length, network_game)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (str(h.session_uid), _now(), h.packet_format, h.game_year,
                  s["track_id"], ids.track_name(s["track_id"]),
                  s["session_type"], ids.session_type_name(s["session_type"]),
-                 s["weather"], s["air_temp"], s["track_temp"], s["track_length"]))
+                 s["weather"], s["air_temp"], s["track_temp"], s["track_length"],
+                 s.get("network_game", 0)))
             self.con.commit()
             self.session_row_id = cur.lastrowid
-            print("[f1trace] new session: %s %s" % (
+            mp_tag = " (Multiplayer)" if s.get("network_game") else ""
+            print("[f1trace] new session: %s %s%s" % (
                 ids.track_name(s["track_id"]),
-                ids.session_type_name(s["session_type"])))
+                ids.session_type_name(s["session_type"]),
+                mp_tag))
+        elif self.session_row_id and s.get("network_game") == 1:
+            self.con.execute("UPDATE sessions SET network_game=1 WHERE id=? AND network_game=0",
+                             (self.session_row_id,))
+            self.con.commit()
+        st_name = ids.session_type_name(s["session_type"])
+        if s.get("network_game"):
+            st_name += " (MP)"
         self._set_status(session={
             "id": self.session_row_id,
             "track": ids.track_name(s["track_id"]),
-            "type": ids.session_type_name(s["session_type"]),
+            "type": st_name,
         })
 
     # ---------------------------------------------------------- lap data

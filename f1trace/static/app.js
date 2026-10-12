@@ -18,6 +18,7 @@ const state = {
   viewD: null,       // [d0, d1] focused distance range (map zoom -> charts)
   sort: "recent",       // lap list ordering: recent | fastest
   driverFilter: "all",  // all | <driver_name>
+  sessionFilter: "all", // all | tt | race | race_mp | race_solo | quali | practice
   weatherFilter: "all", // all | dry | wet
   validOnly: false,     // only valid laps
   noAssistsOnly: false, // only zero-assists laps
@@ -830,8 +831,12 @@ const WEATHER_NAMES = {
 function fmtSession(lap) {
   // "2026-07-11T15:19:09" -> "07-11 15:19"
   const at = (lap.started_at || "").slice(5, 16).replace("T", " ");
+  let typeStr = lap.session_type_name || "?";
+  if (lap.network_game === 1) {
+    typeStr = `🌐 MP ${typeStr}`;
+  }
   const wStr = lap.weather != null ? ` · ${WEATHER_NAMES[lap.weather] || (lap.weather >= 3 ? "WET" : "DRY")}` : "";
-  return `${at} · ${lap.session_type_name || "?"}${wStr} · session #${lap.session_id}`;
+  return `${at} · ${typeStr}${wStr} · session #${lap.session_id}`;
 }
 
 /* F1 Broadcast aesthetics helpers: Team colors, 3-letter driver codes, tyre graphics */
@@ -993,6 +998,34 @@ function visibleLaps() {
   laps = laps.filter((l) => !isPaceRef(l));
   if (state.driverFilter !== "all")
     laps = laps.filter((l) => (l.driver_name || (l.car_role === "player" ? "You" : "")) === state.driverFilter);
+  if (state.sessionFilter !== "all") {
+    laps = laps.filter((l) => {
+      const st = l.session_type;
+      const stName = (l.session_type_name || "").toLowerCase();
+      const isMp = l.network_game === 1;
+      const isRace = [15, 16, 17].includes(st) || stName.includes("race");
+      const isTT = st === 18 || stName.includes("time trial");
+      const isQuali = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14].includes(st) || stName.includes("quali") || stName.includes("sprint so");
+      const isPractice = [1, 2, 3, 4].includes(st) || stName.includes("practice") || stName.startsWith("p");
+
+      switch (state.sessionFilter) {
+        case "tt":
+          return isTT;
+        case "race":
+          return isRace;
+        case "race_mp":
+          return isRace && isMp;
+        case "race_solo":
+          return isRace && !isMp;
+        case "quali":
+          return isQuali;
+        case "practice":
+          return isPractice;
+        default:
+          return true;
+      }
+    });
+  }
   if (state.weatherFilter === "dry")
     laps = laps.filter((l) => l.weather == null || l.weather <= 2);
   else if (state.weatherFilter === "wet")
@@ -2428,6 +2461,10 @@ $("sort-seg")?.addEventListener("click", (e) => {
 });
 $("driver-select")?.addEventListener("change", (e) => {
   state.driverFilter = e.target.value;
+  renderLapList();
+});
+$("session-select")?.addEventListener("change", (e) => {
+  state.sessionFilter = e.target.value;
   renderLapList();
 });
 $("weather-seg")?.addEventListener("click", (e) => {

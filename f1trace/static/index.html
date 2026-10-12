@@ -50,17 +50,28 @@ if (location.protocol === "file:") {
         <select id="driver-select" class="driver-filter-sel" title="Filter laps by driver">
           <option value="all">ALL DRIVERS</option>
         </select>
+        <select id="session-select" class="session-filter-sel" title="Filter laps by session type / game mode">
+          <option value="all">ALL SESSIONS</option>
+          <option value="tt">⏱️ TIME TRIAL</option>
+          <option value="race">🏎️ ALL GP / RACES</option>
+          <option value="race_mp">🌐 GP MULTIPLAYER</option>
+          <option value="race_solo">👤 GP SOLO</option>
+          <option value="quali">🚦 QUALIFYING</option>
+          <option value="practice">🔧 PRACTICE</option>
+        </select>
+      </div>
+      <div class="lap-ctrl-row">
         <div class="seg small" id="sort-seg" title="Lap ordering">
           <button data-sort="recent" class="on">RECENT</button>
           <button data-sort="fastest">FASTEST</button>
         </div>
-      </div>
-      <div class="lap-ctrl-row">
         <div class="seg small" id="weather-seg" title="Filter by weather conditions">
           <button data-weather="all" class="on">ALL</button>
           <button data-weather="dry">DRY</button>
           <button data-weather="wet">WET</button>
         </div>
+      </div>
+      <div class="lap-ctrl-row">
         <button id="valid-toggle" class="toggle" title="Only show valid laps (no track limits / corner cuts)">VALID</button>
         <button id="asst-toggle" class="toggle" title="Only show laps driven with zero assists">NO ASSISTS</button>
       </div>
