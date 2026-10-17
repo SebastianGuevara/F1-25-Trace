@@ -2995,6 +2995,35 @@ $("mobile-laps-btn")?.addEventListener("click", () => {
 });
 $("sidebar-backdrop")?.addEventListener("click", closeMobileSidebar);
 
+/* Xeneon Edge layout (2560×720 touch bar): one row with the telemetry
+   card docked beside the map and the charts to the right. AUTO turns it
+   on for very wide, short viewports; the header chip cycles
+   AUTO / ON / OFF, remembered. ?view=edge forces it for one visit. */
+const EDGE_MODES = ["auto", "on", "off"];
+let edgeMode = "auto";
+try {
+  const saved = localStorage.getItem("f1trace.edge");
+  if (EDGE_MODES.includes(saved)) edgeMode = saved;
+} catch (e) { /* private mode */ }
+if (new URLSearchParams(location.search).get("view") === "edge") edgeMode = "on";
+function isEdge() { return document.documentElement.classList.contains("edge"); }
+function applyEdge() {
+  const w = window.innerWidth, h = window.innerHeight;
+  const on = edgeMode === "on" || (edgeMode === "auto" && w / h >= 3 && h <= 900);
+  document.documentElement.classList.toggle("edge", on);
+  const btn = $("edge-btn");
+  btn.textContent = `EDGE · ${edgeMode.toUpperCase()}`;
+  btn.classList.toggle("on", on);
+}
+$("edge-btn").addEventListener("click", () => {
+  edgeMode = EDGE_MODES[(EDGE_MODES.indexOf(edgeMode) + 1) % EDGE_MODES.length];
+  try { localStorage.setItem("f1trace.edge", edgeMode); }
+  catch (e) { /* private mode */ }
+  applyEdge();
+  rebuildScene();
+});
+applyEdge();
+
 /* Collapse the whole lap tray to a thin rail; remembered. */
 {
   const setSide = (collapsed) => {
@@ -3029,7 +3058,7 @@ $("sidebar-backdrop")?.addEventListener("click", closeMobileSidebar);
   applyHudPos();
   let ox = 0, oy = 0, moving = false;
   hud.addEventListener("pointerdown", (e) => {
-    if (!state.hudOpen || e.target.closest("#hud-steer-btn, .card-tag")) return;
+    if (!state.hudOpen || isEdge() || e.target.closest("#hud-steer-btn, .card-tag")) return;
     moving = true; hud.classList.add("drag");
     hud.setPointerCapture(e.pointerId);
     const r = hud.getBoundingClientRect();
@@ -3063,6 +3092,7 @@ $("sidebar-backdrop")?.addEventListener("click", closeMobileSidebar);
     catch (e) { /* private mode */ }
     applyHudOpen();
     applyHudPos();   // re-clamp: the card just changed size
+    if (isEdge() && state.lapA) rebuildScene();   // docked: the map just changed width
   });
 }
 
@@ -3104,6 +3134,7 @@ $("sidebar-backdrop")?.addEventListener("click", closeMobileSidebar);
 
 window.addEventListener("resize", () => {
   if (window.innerWidth > 768) closeMobileSidebar();
+  applyEdge();
   rebuildScene();
 });
 document.addEventListener("visibilitychange", () => {
