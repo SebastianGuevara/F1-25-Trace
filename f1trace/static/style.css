@@ -1104,7 +1104,7 @@ html.edge #sidebar.collapsed { width: 32px; }
 
 html.edge #main {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) auto;
 }
 html.edge #stage {
@@ -1150,3 +1150,13 @@ html.edge .cv { font-size: 13px; }
 html.edge .lap-row { min-height: 40px; }
 html.edge #map-toolbar { flex-wrap: wrap-reverse; }
 html.edge #map-toolbar > * { flex: none; white-space: nowrap; }
+
+html:not(.edge) #fs-btn { display: none; }
+html.edge header { padding: 3px 12px; }
+html.edge .side-head .hint { display: none; }
+html.edge #sidebar { width: 300px; }
+html.edge .lap-sub { overflow: hidden; white-space: nowrap; }
+/* empty state: centred on the map, beside the docked card, not over it */
+html.edge #stage:has(#hud:not(.closed)) #empty-hint { left: var(--edge-hud-w); }
+html.edge #empty-hint p { font-size: 12px; }
+html.edge #sector-card { padding: 6px 10px; font-size: 11px; }

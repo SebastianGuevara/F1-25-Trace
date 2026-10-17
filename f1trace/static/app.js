@@ -3023,6 +3023,12 @@ $("edge-btn").addEventListener("click", () => {
   rebuildScene();
 });
 applyEdge();
+$("fs-btn").addEventListener("click", () => {
+  if (document.fullscreenElement) document.exitFullscreen();
+  else document.documentElement.requestFullscreen?.().catch(() => {});
+});
+document.addEventListener("fullscreenchange", () =>
+  $("fs-btn").classList.toggle("on", !!document.fullscreenElement));
 
 /* Collapse the whole lap tray to a thin rail; remembered. */
 {
