@@ -365,15 +365,99 @@ function speakBrowser(text) {
     speechSynthesis.speak(u);
   });
 }
+/* F1-style team radio, all synthesised: a squelch burst and a double
+   beep open each call, the voice goes through a band-limited "radio"
+   filter with a faint hiss, and a short squelch closes it. */
+let fx = null;
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+function fxCtx() {
+  fx = fx || new AudioContext();
+  if (fx.state === "suspended") fx.resume();
+  return fx;
+}
+function noise(ctx, secs) {
+  const b = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * secs), ctx.sampleRate);
+  const d = b.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  const s = ctx.createBufferSource();
+  s.buffer = b;
+  return s;
+}
+function filt(ctx, type, f, q = 0.7, gain = 0) {
+  const b = ctx.createBiquadFilter();
+  b.type = type; b.frequency.value = f; b.Q.value = q; b.gain.value = gain;
+  return b;
+}
+function env(ctx, t, peak, dur) {
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(peak, t + 0.008);
+  g.gain.setValueAtTime(peak, t + dur * 0.6);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  return g;
+}
+function squelch(ctx, t, dur, vol) {
+  const n = noise(ctx, dur);
+  n.connect(filt(ctx, "bandpass", 2400, 0.9)).connect(env(ctx, t, vol, dur)).connect(ctx.destination);
+  n.start(t); n.stop(t + dur);
+}
+function tone(ctx, t, f, dur, vol) {
+  const o = ctx.createOscillator();
+  o.type = "triangle"; o.frequency.value = f;
+  o.connect(env(ctx, t, vol, dur)).connect(ctx.destination);
+  o.start(t); o.stop(t + dur);
+}
+/* 1 = incoming call, 2 = "I'm listening" chirp, 3 = end of call.
+   Returns how long it lasts (s). */
+function beep(kind) {
+  try {
+    const ctx = fxCtx(), t = ctx.currentTime + 0.02;
+    if (kind === 2) { tone(ctx, t, 880, 0.06, 0.2); tone(ctx, t + 0.075, 1320, 0.09, 0.2); return 0.18; }
+    if (kind === 3) { squelch(ctx, t, 0.14, 0.12); return 0.14; }
+    squelch(ctx, t, 0.08, 0.16);
+    tone(ctx, t + 0.07, 1250, 0.075, 0.18);
+    tone(ctx, t + 0.17, 1250, 0.075, 0.18);
+    return 0.27;
+  } catch (e) { return 0; }
+}
+function shaper(ctx, k) {
+  const ws = ctx.createWaveShaper(), c = new Float32Array(1024);
+  for (let i = 0; i < c.length; i++) { const x = (i / 511.5) - 1; c[i] = ((1 + k) * x) / (1 + k * Math.abs(x)); }
+  ws.curve = c;
+  return ws;
+}
+async function playRadio(blob) {
+  const ctx = fxCtx();
+  if (ctx.state !== "running") throw new Error("audio locked");
+  const buf = await ctx.decodeAudioData(await blob.arrayBuffer());
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const comp = ctx.createDynamicsCompressor();
+  src.connect(filt(ctx, "highpass", 320)).connect(filt(ctx, "peaking", 1800, 1, 5))
+    .connect(filt(ctx, "lowpass", 3600)).connect(shaper(ctx, 2.5)).connect(comp)
+    .connect(ctx.destination);
+  const hiss = noise(ctx, buf.duration + 0.1), hg = ctx.createGain();
+  hg.gain.value = 0.012;
+  hiss.connect(filt(ctx, "bandpass", 3000, 0.6)).connect(hg).connect(ctx.destination);
+  const t = ctx.currentTime + 0.02;
+  hiss.start(t); src.start(t);
+  await new Promise((done) => {
+    src.onended = done;
+    setTimeout(done, (buf.duration + 1) * 1000);   // never hang the queue
+  });
+  try { hiss.stop(); } catch (e) { /* already stopped */ }
+}
 async function speak(m, tts) {
   if (tts === "elevenlabs") {
     try {
       const r = await fetch(`/api/radio/audio?id=${m.id}`, { cache: "no-store" });
       if (r.ok) {
-        const url = URL.createObjectURL(await r.blob());
-        const a = new Audio(url);
-        await new Promise((done) => { a.onended = a.onerror = done; a.play().catch(done); });
-        URL.revokeObjectURL(url);
+        const blob = await r.blob();
+        try { await playRadio(blob); } catch (e) {
+          const url = URL.createObjectURL(blob), a = new Audio(url);
+          await new Promise((done) => { a.onended = a.onerror = done; a.play().catch(done); });
+          URL.revokeObjectURL(url);
+        }
         return;
       }
     } catch (e) { /* fall back to the browser voice */ }
@@ -391,8 +475,9 @@ async function playQueue() {
     if (radioOn) {
       $("rv-radio").classList.add("talking");
       engineerTalking = true;
-      beep(1);
+      await wait(beep(1) * 1000 + 60);
       await speak(m, tts);
+      beep(3);
       $("rv-radio").classList.remove("talking");
       setTimeout(() => {
         engineerTalking = false;
@@ -424,6 +509,7 @@ $("rv-radio").addEventListener("click", () => {
   paintRadioBtn();
   if (radioOn) {
     // this click is the user gesture browsers need before audio can play
+    fxCtx();
     if (!audioCtxUnlocked && window.speechSynthesis) {
       speechSynthesis.speak(new SpeechSynthesisUtterance(""));
       audioCtxUnlocked = true;
@@ -436,6 +522,8 @@ $("rv-radio").addEventListener("click", () => {
 });
 paintRadioBtn();
 setInterval(pollRadio, 400);
+// browsers keep audio locked until the first touch/click on the page
+addEventListener("pointerdown", () => { if (radioOn) fxCtx(); }, { once: true });
 
 /* hands-free talkback: the mic stays open; a simple voice-activity
    detector cuts each phrase (with a little pre-roll so the first word
@@ -444,24 +532,7 @@ setInterval(pollRadio, 400);
    The mic is ignored while the engineer is talking. */
 let engineerTalking = false;
 let followUntil = 0;      // until then, phrases need no wake word
-let beepCtx = null;
 
-/* F1-style radio blip: rising = "I'm listening", falling = end of call */
-function beep(kind) {
-  try {
-    beepCtx = beepCtx || new AudioContext();
-    const t = beepCtx.currentTime, o = beepCtx.createOscillator(), g = beepCtx.createGain();
-    o.type = "sine";
-    const [a, b] = kind === 2 ? [880, 1320] : [1320, 990];
-    o.frequency.setValueAtTime(a, t);
-    o.frequency.setValueAtTime(b, t + 0.07);
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.18, t + 0.01);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
-    o.connect(g).connect(beepCtx.destination);
-    o.start(t); o.stop(t + 0.16);
-  } catch (e) { /* no audio: fine */ }
-}
 function listenFor(ms) {
   followUntil = Date.now() + ms;
   $("rv-mic").classList.add("follow");
@@ -516,7 +587,8 @@ async function sendPhrase(frames, retry = true) {
     const res = await r.json();
     if (res.error && r.status !== 409) showSub({ text: "Radio: " + res.error, prio: 3 }, 2);
     else if (res.wake_only) {
-      beep(2);
+      engineerTalking = true;               // don't hear our own chirp
+      setTimeout(() => { engineerTalking = false; }, beep(2) * 1000 + 150);
       listenFor(8000);
       showSub({ text: "Te escucho…", prio: 0 }, 1);
     } else if (res.heard) {
