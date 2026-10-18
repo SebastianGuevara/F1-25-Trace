@@ -401,8 +401,8 @@ def make_handler(db_path, recorder, demo=False):
         def radio_ask(self):
             """Driver's voice clip -> transcription -> Claude answer, which
             goes out through the normal radio queue. Only for a sender
-            that is on track right now, and behind RADIO_TOKEN when set,
-            since every call spends API credit."""
+            that has sent telemetry (garage and menus count), and behind
+            RADIO_TOKEN when set, since every call spends API credit."""
             token = os.environ.get("RADIO_TOKEN", "").strip()
             if token and self.headers.get("X-Radio-Token", "") != token:
                 return self._json({"error": "token"}, 401)
@@ -412,8 +412,8 @@ def make_handler(db_path, recorder, demo=False):
             if not 0 < n <= 2 * 1024 * 1024:
                 return self._json({"error": "audio too large"}, 413)
             audio = self.rfile.read(n)
-            if not recorder.get_live(sender).get("active"):
-                return self._json({"error": "not on track"}, 409)
+            if not recorder.engineer.knows(sender):
+                return self._json({"error": "unknown driver"}, 409)
             ctype = self.headers.get("Content-Type", "audio/wav")
             return self._json(recorder.engineer.ask(
                 sender, audio, ctype, need_wake=q.get("wake", "1") != "0"))

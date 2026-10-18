@@ -16,12 +16,14 @@ import urllib.error
 import urllib.request
 import uuid
 
-WAKE_WORDS = ("radio", "ingeniero", "equipo", "box")
+# what the driver says first to address the engineer; WAKE_WORDS in .env
+# overrides it (comma-separated, phrases allowed: "oye bono, ingeniero")
+DEFAULT_WAKE = "radio, ingeniero"
 
 STT_PROMPT = ("Conversación por radio de Fórmula 1 entre piloto e ingeniero. "
               "Radio, box, neumáticos, blandos, medios, duros, intermedios, "
               "lluvia, gasolina, ERS, DRS, undercut, overcut, safety car, "
-              "ventana de parada, décimas, delta, desgaste, alerón.")
+              "ventana de parada, décimas, delta, desgaste, alerón. ")
 
 SYSTEM = """Eres el ingeniero de carrera de {driver} en el simulador F1 25. \
 Hablas por la radio del equipo, en español.
@@ -36,6 +38,9 @@ Posiciones como "P4".
 - Tono de ingeniero: calmado, seguro, animando cuando toca.
 
 Datos:
+- on_track=false: el piloto está en el garaje, en boxes o en un menú; \
+los datos son de la última vez que estuvo en pista. Puedes charlar, \
+repasar la sesión y planear la siguiente salida.
 - Usa SOLO la telemetría que te paso en cada mensaje. Si un dato no está, \
 dilo en vez de inventarlo.
 - Neumáticos en orden delantero izquierdo, delantero derecho, trasero \
@@ -90,7 +95,8 @@ def transcribe(audio, filename="voz.wav", ctype="audio/wav"):
     boundary = uuid.uuid4().hex
     parts = []
     for name, value in (("model", model), ("language", "es"),
-                        ("prompt", STT_PROMPT), ("response_format", "json")):
+                        ("prompt", STT_PROMPT + wake_label()),
+                        ("response_format", "json")):
         parts.append(("--%s\r\nContent-Disposition: form-data; name=\"%s\""
                       "\r\n\r\n%s\r\n" % (boundary, name, value)).encode())
     parts.append(("--%s\r\nContent-Disposition: form-data; name=\"file\"; "
@@ -110,21 +116,28 @@ def _plain(text):
     return re.sub(r"[^a-z0-9ñ ]+", " ", t).split()
 
 
+def wake_label():
+    return os.environ.get("WAKE_WORDS", "").strip() or DEFAULT_WAKE
+
+
+def wake_words():
+    return [tuple(_plain(w)) for w in wake_label().split(",") if _plain(w)]
+
+
 def strip_wake(text):
-    """The question without its wake word, or None if there's no wake
-    word among the first few words (talking to someone else, game audio,
-    or a transcription of noise)."""
+    """The question without its wake word, or None if the phrase doesn't
+    start with one (talking to someone else, game audio, or
+    a transcription of noise)."""
     raw = text.split()
-    seen = 0
-    for i, w in enumerate(raw):
-        plain = _plain(w)
-        if not plain:
-            continue
-        if plain[0] in WAKE_WORDS:
-            return " ".join(raw[i + 1:]).strip(" ,.:;¿?¡!") or ""
-        seen += 1
-        if seen >= 4:
-            break
+    toks = [(i, w) for i, r in enumerate(raw) for w in _plain(r)]
+    words = [w for _, w in toks]
+    for ww in wake_words():
+        n = len(ww)
+        # first or second word, so "oye bono" works but not mid-sentence
+        for j in range(0, min(2, len(words) - n + 1)):
+            if tuple(words[j:j + n]) == ww:
+                rest = raw[toks[j + n - 1][0] + 1:]
+                return " ".join(rest).strip(" ,.:;¿?¡!") or ""
     return None
 
 

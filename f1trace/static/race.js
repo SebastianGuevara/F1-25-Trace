@@ -217,6 +217,9 @@ const store = {
 let follow = new URLSearchParams(location.search).get("driver")
   || store.get("f1trace.raceFollow") || store.get("f1trace.myDriver") || "";
 let sender = "";          // ip:port of the followed driver, resolved from live_all
+// the radio keeps talking to the last sender seen even when telemetry
+// stops (garage, menus); it only changes when another driver is picked
+let radioTarget = "";
 let inFlight = false, lastOk = 0, waitMsg = "";
 const same = (a, b) => (a || "").trim().toLowerCase() === (b || "").trim().toLowerCase();
 
@@ -273,6 +276,7 @@ async function refreshSenders() {
 
   const next = pick ? pick.sender : "";
   if (next !== sender) { sender = next; lastOk = 0; document.body.classList.remove("stale"); }
+  if (next) radioTarget = next;
 
   const h = $("rv-wait").querySelector("h2"), p = $("rv-wait").querySelector("p");
   if (!follow && all.length > 1) {
@@ -288,6 +292,7 @@ async function refreshSenders() {
 }
 $("rv-sender").addEventListener("change", (e) => {
   follow = e.target.value;
+  radioTarget = "";
   store.set("f1trace.raceFollow", follow);
   refreshSenders();
 });
@@ -353,7 +358,7 @@ function speakBrowser(text) {
   return new Promise((done) => {
     if (!window.speechSynthesis) return done();
     const u = new SpeechSynthesisUtterance(text);
-    u.lang = "es-ES"; u.rate = 1.1;
+    u.lang = "es-ES"; u.rate = 0.95;
     const v = speechSynthesis.getVoices().find((v) => v.lang.startsWith("es"));
     if (v) u.voice = v;
     u.onend = u.onerror = () => done();
@@ -395,10 +400,10 @@ async function playQueue() {
   radioBusy = false;
 }
 async function pollRadio() {
-  if (!sender) return;
-  if (sender !== radioSender) { radioSender = sender; radioSince = -1; }
+  if (!radioTarget) return;
+  if (radioTarget !== radioSender) { radioSender = radioTarget; radioSince = -1; }
   try {
-    const q = `sender=${encodeURIComponent(sender)}&since=${Math.max(radioSince, 0)}`;
+    const q = `sender=${encodeURIComponent(radioTarget)}&since=${Math.max(radioSince, 0)}`;
     const res = await fetch(`/api/radio?${q}`, { cache: "no-store" }).then((r) => r.json());
     if (radioSince < 0) { radioSince = res.last_id; return; }   // skip old calls
     for (const m of res.messages) {
@@ -418,7 +423,7 @@ $("rv-radio").addEventListener("click", () => {
       speechSynthesis.speak(new SpeechSynthesisUtterance(""));
       audioCtxUnlocked = true;
     }
-    if (sender) fetch(`/api/radio/check?sender=${encodeURIComponent(sender)}`, { method: "POST" });
+    if (radioTarget) fetch(`/api/radio/check?sender=${encodeURIComponent(radioTarget)}`, { method: "POST" });
   } else {
     radioQueue.length = 0;
     window.speechSynthesis?.cancel();
@@ -433,6 +438,13 @@ setInterval(pollRadio, 700);
    and only answers phrases that start with a wake word ("radio…").
    The mic is ignored while the engineer is talking. */
 let engineerTalking = false;
+let wakeLabel = "radio";
+fetch("/api/status").then((r) => r.json()).then((st) => {
+  if (st.radio?.wake) {
+    wakeLabel = st.radio.wake;
+    $("rv-mic").title = `talk to the engineer hands-free: start with «${wakeLabel}» (needs HTTPS)`;
+  }
+}).catch(() => {});
 let mic = null;
 let micOn = store.get("f1trace.mic") === "1";
 const vad = { floor: 0.004, loud: 0, quiet: 0, speaking: false, pre: [], frames: [], voiced: 0 };
@@ -457,12 +469,12 @@ function wav(frames) {
   return new Blob([buf], { type: "audio/wav" });
 }
 async function sendPhrase(frames, retry = true) {
-  if (!sender) return;
+  if (!radioTarget) return;
   const headers = { "Content-Type": "audio/wav" };
   const tok = store.get("f1trace.radioToken");
   if (tok) headers["X-Radio-Token"] = tok;
   try {
-    const r = await fetch(`/api/radio/ask?sender=${encodeURIComponent(sender)}`,
+    const r = await fetch(`/api/radio/ask?sender=${encodeURIComponent(radioTarget)}`,
       { method: "POST", headers, body: wav(frames) });
     if (r.status === 401 && retry) {
       const t = prompt("Radio token (RADIO_TOKEN in the server's .env):");
@@ -545,7 +557,9 @@ $("rv-mic").addEventListener("click", async () => {
     micOn = await startMic();
     if (micOn) {
       if (!radioOn) $("rv-radio").click();   // answers come over the radio
-      showSub({ text: "Micrófono abierto. Empieza con «radio», por ejemplo: «Radio, ¿cómo van las gomas?»", prio: 1 }, 1);
+      const w = (wakeLabel.split(",")[0] || "radio").trim();
+      const W = w.charAt(0).toUpperCase() + w.slice(1);
+      showSub({ text: `Micrófono abierto. Empieza con «${w}», por ejemplo: «${W}, ¿cómo van las gomas?»`, prio: 1 }, 1);
     }
   }
   store.set("f1trace.mic", micOn ? "1" : "0");

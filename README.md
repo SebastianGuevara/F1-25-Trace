@@ -217,8 +217,9 @@ engineer calls out, in Spanish:
   laps, tyres up to temperature after the out lap, time left.
 
 **🎙 MIC** opens the microphone hands-free (no button to press): start a
-phrase with *radio*, *ingeniero*, *equipo* or *box* — "Radio, ¿cómo van
-las gomas?" — and the engineer answers on the radio, using the live
+phrase with the wake word (*radio* or *ingeniero* by default) — "Radio,
+¿cómo van las gomas?" — and the engineer answers on the radio, also from
+the garage or a menu, using the live
 telemetry and the lap history. The page must be opened over HTTPS for
 the browser to allow the microphone. Headphones work best.
 
@@ -232,6 +233,8 @@ OPENAI_API_KEY=...             # speech-to-text for the mic
 ANTHROPIC_API_KEY=...          # answers and strategy
 RADIO_TOKEN=...                # optional: the page asks for it once;
                                # stops strangers spending your credit
+WAKE_WORDS=radio, ingeniero    # optional: how you address the engineer
+ELEVENLABS_SPEED=0.95          # optional: 0.7 slow .. 1.2 fast
 ```
 
 ## Layout

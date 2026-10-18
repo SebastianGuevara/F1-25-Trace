@@ -123,6 +123,11 @@ class RaceEngineer:
                          or "pNInz6obpgDQGcFmaJgB")
         self.el_model = (os.environ.get("ELEVENLABS_MODEL", "").strip()
                          or "eleven_flash_v2_5")
+        try:   # ElevenLabs accepts 0.7 (slow) .. 1.2 (fast)
+            self.el_speed = min(1.2, max(0.7, float(
+                os.environ.get("ELEVENLABS_SPEED", "") or 0.95)))
+        except ValueError:
+            self.el_speed = 0.95
         self.last_tts_error = None
 
     # -------------------------------------------------------- public
@@ -131,7 +136,14 @@ class RaceEngineer:
         return {"tts": "elevenlabs" if self.el_key else "browser",
                 "tts_error": self.last_tts_error,
                 "stt": brain.stt_ready(), "llm": brain.llm_ready(),
-                "token": bool(os.environ.get("RADIO_TOKEN", "").strip())}
+                "token": bool(os.environ.get("RADIO_TOKEN", "").strip()),
+                "wake": brain.wake_label()}
+
+    def knows(self, sender):
+        """True if this sender has sent telemetry since TRACE started."""
+        with self._lock:
+            st = self._senders.get(sender)
+            return st is not None and st.live is not None
 
     def messages(self, sender, since):
         """Calls for one sender newer than `since`; marks it as listened."""
@@ -217,7 +229,7 @@ class RaceEngineer:
                     "language_code": "es",
                     "voice_settings": {"stability": 0.5,
                                        "similarity_boost": 0.75,
-                                       "speed": 1.1},
+                                       "speed": self.el_speed},
                 }).encode(),
                 headers={"xi-api-key": self.el_key,
                          "Content-Type": "application/json",
@@ -585,7 +597,9 @@ class RaceEngineer:
         r["forecast"] = (live.get("race") or {}).get("forecast", [])[:6]
         ty = r.get("tyres") or {}
         r["tyre_compound"] = COMPOUND_ES.get(ty.get("visual"))
+        age = time.time() - live.get("updated_at", 0)
         return {
+            "on_track": age < 3, "telemetry_age_s": int(age),
             "session": r.get("session_type"), "track": live.get("track_name"),
             "speed_kmh": live.get("speed"), "gear": live.get("gear"),
             "now": r,
