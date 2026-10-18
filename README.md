@@ -210,7 +210,9 @@ engineer calls out, in Spanish:
 
 - every session: safety car / VSC, penalties and warnings, rain now and
   in the forecast, tyre wear and damage, car damage, faults;
-- race: positions won or lost, DRS range ahead / behind, fuel target,
+- race: push / manage calls (fights, clean air, tyre wear projected to
+  the stop or the flag), undercut calls when the car ahead or behind
+  pits, positions won or lost, DRS range ahead / behind, fuel target,
   pit window (with the rejoin position), a summary every 2 laps with the
   gap trend, and a short Claude strategy read every 8 laps;
 - practice / qualifying: lap time vs your best, sector deltas, invalid
@@ -219,7 +221,9 @@ engineer calls out, in Spanish:
 **🎙 MIC** opens the microphone hands-free (no button to press): start a
 phrase with the wake word (*radio* or *ingeniero* by default) — "Radio,
 ¿cómo van las gomas?" — and the engineer answers on the radio, also from
-the garage or a menu, using the live
+the garage or a menu. Say just the wake word to get a beep and ask
+after it; after an answer you can follow up without it. Routine calls
+wait while you're talking to the engineer, using the live
 telemetry and the lap history. The page must be opened over HTTPS for
 the browser to allow the microphone. Headphones work best.
 

@@ -109,6 +109,8 @@ class _Sender:
         self.session_type = None
         self.extra = {}           # whole field, setup, assists (1 Hz)
         self.field_best = {}      # driver name -> best lap ms seen
+        self.pace = None          # last pace call id (push_* / manage_*)
+        self.pace_lap = 0
         self.pit_lap = False      # this lap started in / went through the pits
 
 
@@ -121,6 +123,7 @@ class RaceEngineer:
         self._audio = collections.OrderedDict()      # msg id -> mp3 bytes
         self._audio_events = {}
         self._replies = collections.deque(maxlen=50)   # ids answering the driver
+        self._conts = collections.deque(maxlen=50)     # 2nd+ sentence of a reply
         self.el_key = os.environ.get("ELEVENLABS_API_KEY", "").strip()
         self.el_voice = (os.environ.get("ELEVENLABS_VOICE_ID", "").strip()
                          or "pNInz6obpgDQGcFmaJgB")
@@ -155,7 +158,7 @@ class RaceEngineer:
             st.listened = time.time()
             last = self._next_id - 1
             out = [{"id": i, "t": t, "text": tx, "prio": p,
-                    "reply": i in self._replies}
+                    "reply": i in self._replies, "cont": i in self._conts}
                    for (i, s, t, tx, p) in self._msgs
                    if s == sender and i > since]
         return {"last_id": last, "messages": out,
@@ -198,12 +201,14 @@ class RaceEngineer:
 
     # -------------------------------------------------------- core
 
-    def _say(self, sender, text, prio=1, reply=False):
+    def _say(self, sender, text, prio=1, reply=False, cont=False):
         with self._lock:
             mid = self._next_id
             self._next_id += 1
             if reply:
                 self._replies.append(mid)
+            if cont:
+                self._conts.append(mid)
             self._msgs.append((mid, sender, time.time(), text, prio))
             st = self._senders.get(sender)
             listening = st is not None and time.time() - st.listened < 10
@@ -403,6 +408,8 @@ class RaceEngineer:
                 say("%s a %s detrás, tiene DRS. Defiende." % (
                     who or "El de atrás", gap_es(gb1)), 2)
 
+        if race and lap >= 2 and on_track:
+            self._rival_pit_rules(say, st, r, now)
         self._tyre_rules(say, st, r, lap, on_track, speed, now)
         self._damage_rules(say, st, r)
         self._forecast_rules(say, st, r)
@@ -473,6 +480,9 @@ class RaceEngineer:
                 st.fuel_said_lap = lap
             st.fuel_state = state
 
+        if race and total and lap >= 3:
+            self._pace_rules(say, st, r, lap, total)
+
         # race summary every few laps
         if race and lap >= 2 and lap % SPEAK_EVERY_LAPS == 0 and r.get("position"):
             bits = ["Vuelta %d. P%d." % (lap, r["position"])]
@@ -508,6 +518,69 @@ class RaceEngineer:
         if per < 0:
             return "Le recortas %s por vuelta al de delante." % gap_es(-per)
         return "El de delante se escapa, %s por vuelta." % gap_es(per)
+
+    def _rival_pit_rules(self, say, st, r, now):
+        """The car just ahead / behind dives into the pits: the classic
+        undercut call (push to jump them / cover them)."""
+        field = st.extra.get("field") or []
+        pos = r.get("position")
+        for c in field:
+            n = c.get("name")
+            if not n or c.get("me"):
+                continue
+            key = "pit_" + n
+            if not c.get("in_pit") or now < st.cooldown.get(key, 0):
+                continue
+            if c["pos"] == pos - 1:
+                st.cooldown[key] = now + 180
+                say("%s entra a boxes. Push, push: vueltas rápidas ahora para "
+                    "ganarle la posición al salir." % n, 2)
+            elif c["pos"] == pos + 1:
+                st.cooldown[key] = now + 180
+                say("%s, detrás, entra a boxes. Atento al undercut: empuja "
+                    "esta vuelta." % n, 2)
+
+    def _pace_rules(self, say, st, r, lap, total):
+        """Once a lap: push or manage, with the reason, only when the
+        call changes (at most every 2 laps)."""
+        left = total - lap + 1
+        gf, gb = r.get("gap_front_ms"), r.get("gap_behind_ms")
+        ty = r.get("tyres") or {}
+        wear_now = max(ty["wear"]) if ty.get("wear") else None
+        # wear rate over the current stint's last laps
+        stint = [x for x in st.laps if x.get("pit_stops") == r.get("pit_stops")
+                 and x.get("wear_max") is not None][-4:]
+        proj, to_go = None, left
+        pw = r.get("pit_window")
+        if pw and not r.get("pit_stops") and pw.get("ideal", 0) > lap:
+            to_go = pw["ideal"] - lap
+        if wear_now is not None and len(stint) >= 3:
+            rate = (stint[-1]["wear_max"] - stint[0]["wear_max"]) / (len(stint) - 1)
+            if rate > 0:
+                proj = wear_now + rate * to_go
+
+        call = reason = None
+        if left <= 3 and ((gf and gf < 2000) or (gb and gb < 1500)):
+            call, reason = "push_end", "Últimas vueltas y hay pelea, todo lo que tengas."
+        elif proj is not None and proj > 80:
+            call, reason = "manage_tyres", (
+                "Gestiona los neumáticos: a este ritmo %s %s. Suave en las "
+                "tracciones y sin deslizar." % (
+                    "no llegan" if proj >= 95 else
+                    "llegamos al %d%% de desgaste" % proj,
+                    "a la parada" if to_go < left else "al final"))
+        elif gf and gf < 1500:
+            call, reason = "push_attack", "Tienes al de delante a %s, push ahora." % gap_es(gf)
+        elif gb and gb < 1200:
+            call, reason = "push_defend", "Te aprietan por detrás a %s, mantén el ritmo." % gap_es(gb)
+        elif (gf is None or gf > 4000) and gb and gb > 4000:
+            call, reason = "manage_air", ("Aire limpio delante y detrás. Gestiona "
+                                      "gomas y gasolina, ritmo constante.")
+        elif proj is not None and proj < 55 and to_go <= 8:
+            call, reason = "push_tyres", "Las gomas aguantan de sobra, puedes apretar."
+        if call and call != st.pace and lap - st.pace_lap >= 2:
+            st.pace, st.pace_lap = call, lap
+            say(reason, 1)
 
     def _forecast_rules(self, say, st, r):
         fc = r.get("forecast") or []
@@ -664,6 +737,7 @@ class RaceEngineer:
             if st.asking:
                 return {"heard": None, "busy": True}
             st.asking = True
+        t0 = time.time()
         try:
             heard = brain.transcribe(
                 audio, "voz.webm" if "webm" in ctype else "voz.wav", ctype)
@@ -682,17 +756,27 @@ class RaceEngineer:
                 # just the wake word: the page beeps and listens for the
                 # question without needing the wake word again
                 return {"heard": heard, "accepted": True, "wake_only": True}
+            t_stt = time.time() - t0
+            parts = []
             try:
-                text = brain.answer(st.driver, self._context(st), q, st.qa)
+                # voice each sentence as soon as it's written
+                for chunk in brain.answer_stream(
+                        st.driver, self._context(st), q, st.qa):
+                    if not parts:
+                        print("[engineer] tiempos: voz->texto %.1fs, "
+                              "primera frase %.1fs" % (t_stt, time.time() - t0))
+                    self._say(sender, chunk, 3, reply=True, cont=bool(parts))
+                    parts.append(chunk)
             except brain.BrainError as e:
                 print("[engineer] answer: %s" % e)
-                self._say(sender, "Perdona, tengo problemas en el muro. "
-                          "Repíteme en un momento.", 3, reply=True)
-                return {"heard": heard, "accepted": True, "error": str(e)}
-            if not text:
-                text = "No te he copiado bien, ¿me lo repites?"
-            st.qa = (st.qa + [(q, text)])[-6:]
-            self._say(sender, text, 3, reply=True)
+                if not parts:
+                    self._say(sender, "Perdona, tengo problemas en el muro. "
+                              "Repíteme en un momento.", 3, reply=True)
+                    return {"heard": heard, "accepted": True, "error": str(e)}
+            if not parts:
+                parts = ["No te he copiado bien, ¿me lo repites?"]
+                self._say(sender, parts[0], 3, reply=True)
+            st.qa = (st.qa + [(q, " ".join(parts))])[-8:]
             return {"heard": heard, "accepted": True}
         except brain.BrainError as e:
             print("[engineer] ask: %s" % e)

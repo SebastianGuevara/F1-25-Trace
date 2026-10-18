@@ -29,8 +29,14 @@ SYSTEM = """Eres el ingeniero de carrera de {driver} en el simulador F1 25. \
 Hablas por la radio del equipo, en español.
 
 Cómo hablas:
-- Corto y directo, como una radio real de F1: 1 a 3 frases, unas 35 \
-palabras como máximo, salvo que el piloto pida detalle.
+- Es una conversación de radio entre tú y tu piloto, no un informe. \
+Habla natural y cercano, como un ingeniero que conoce bien a su piloto: \
+responde a lo que te dice (también si solo charla, bromea o se queja), \
+recuerda lo que hablasteis antes y sigue el hilo. Puedes preguntarle \
+algo de vuelta cuando ayude ("¿cómo notas el tren trasero?").
+- Breve porque está conduciendo: normalmente 1 o 2 frases. La primera \
+frase ya debe contestar lo importante; el detalle, después. Más largo \
+solo si te lo pide o está en el garaje.
 - Tu texto se lee en voz alta: nada de markdown, listas, emojis ni \
 símbolos raros. Números con coma decimal. Gaps en décimas ("tres \
 décimas") o segundos ("1,4 segundos"). Tiempos de vuelta como "1 34,2". \
@@ -179,8 +185,7 @@ def strip_wake(text):
     return None
 
 
-def answer(driver, context, question, history, strategy=False):
-    """Claude's radio reply. `history` = [(question, answer), ...]."""
+def _request(driver, context, question, history, strategy, stream):
     key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     if not key:
         raise BrainError("falta ANTHROPIC_API_KEY")
@@ -188,19 +193,63 @@ def answer(driver, context, question, history, strategy=False):
                             else "ANTHROPIC_MODEL", "").strip()
              or ("claude-sonnet-5-5" if strategy else "claude-haiku-5-5"))
     msgs = []
-    for q, a in history[-4:]:
+    for q, a in history[-8:]:
         msgs.append({"role": "user", "content": q})
         msgs.append({"role": "assistant", "content": a})
     msgs.append({"role": "user", "content":
                  "Telemetría ahora mismo:\n%s\n\nPiloto: %s" % (
                      json.dumps(context, ensure_ascii=False,
                                 separators=(",", ":")), question)})
-    res = _post("https://api.anthropic.com/v1/messages",
-                json.dumps({"model": model, "max_tokens": 300,
-                            "system": SYSTEM.format(driver=driver or "el piloto"),
-                            "messages": msgs}).encode(),
-                {"x-api-key": key, "anthropic-version": "2023-06-01",
-                 "content-type": "application/json"}, timeout=30)
-    text = " ".join(b.get("text", "") for b in res.get("content", [])
-                    if b.get("type") == "text").strip()
-    return re.sub(r"[*_#`]+", "", text)
+    body = {"model": model, "max_tokens": 400, "stream": stream,
+            "system": SYSTEM.format(driver=driver or "el piloto"),
+            "messages": msgs}
+    return urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=json.dumps(body).encode(),
+        headers={"x-api-key": key, "anthropic-version": "2023-06-01",
+                 "content-type": "application/json"})
+
+
+_SENTENCE_END = re.compile(r"[.!?…](?=\s)")
+
+
+def answer_stream(driver, context, question, history, strategy=False):
+    """Claude's radio reply as it's written, one sentence at a time, so
+    the first sentence can be voiced while the rest is still coming."""
+    req = _request(driver, context, question, history, strategy, True)
+    buf = ""
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            for line in resp:
+                if not line.startswith(b"data:"):
+                    continue
+                ev = json.loads(line[5:])
+                if ev.get("type") == "error":
+                    raise BrainError("Claude: %s" % ev.get("error"))
+                d = ev.get("delta") or {}
+                if d.get("type") != "text_delta":
+                    continue
+                buf += re.sub(r"[*_#`]+", "", d.get("text", ""))
+                while True:   # emit whole sentences, at least ~4 words
+                    m = next((m for m in _SENTENCE_END.finditer(buf)
+                              if m.end() >= 18), None)
+                    if not m:
+                        break
+                    out, buf = buf[:m.end()].strip(), buf[m.end():]
+                    if out:
+                        yield out
+    except urllib.error.HTTPError as e:
+        raise BrainError("api.anthropic.com HTTP %d: %s" % (
+            e.code, e.read()[:300].decode("utf-8", "replace")))
+    except BrainError:
+        raise
+    except Exception as e:
+        raise BrainError("api.anthropic.com: %r" % e)
+    if buf.strip():
+        yield buf.strip()
+
+
+def answer(driver, context, question, history, strategy=False):
+    """Claude's whole radio reply. `history` = [(question, answer), ...]."""
+    return " ".join(answer_stream(driver, context, question, history,
+                                  strategy)).strip()

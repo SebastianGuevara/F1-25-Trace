@@ -464,27 +464,44 @@ async function speak(m, tts) {
   }
   await speakBrowser(m.text);
 }
+/* While the driver is talking to the engineer (speaking, waiting for
+   the answer, or in the follow-up window) routine calls wait their turn;
+   answers always go first and urgent calls (prio 3) still get through
+   between sentences. Nothing ever starts while the driver is speaking. */
+let awaitingUntil = 0;
+const convoActive = () => vad.speaking || Date.now() < awaitingUntil || Date.now() < followUntil;
+function nextItem() {
+  let i = radioQueue.findIndex((x) => x.m.reply);
+  if (i < 0) {
+    if (vad.speaking) return null;
+    i = radioQueue.findIndex((x) => !convoActive() || x.m.prio >= 3);
+  }
+  return i < 0 ? null : radioQueue.splice(i, 1)[0];
+}
 async function playQueue() {
   if (radioBusy) return;
   radioBusy = true;
-  while (radioQueue.length) {
-    const { m, tts } = radioQueue.shift();
-    // stale low-priority calls aren't worth hearing late
-    if (Date.now() / 1000 - m.t > (m.prio >= 2 ? 25 : 12)) continue;
+  let item;
+  while ((item = nextItem())) {
+    const { m, tts } = item;
+    // stale routine calls aren't worth hearing late
+    if (!m.reply && Date.now() / 1000 - m.t > (m.prio >= 2 ? 30 : 15)) continue;
+    if (m.reply) awaitingUntil = 0;
     showSub(m);
     if (radioOn) {
       $("rv-radio").classList.add("talking");
       engineerTalking = true;
-      await wait(beep(1) * 1000 + 60);
+      if (!m.cont) await wait(beep(1) * 1000 + 60);   // the next sentence of a reply flows on
       await speak(m, tts);
-      beep(3);
+      const more = radioQueue[0] && radioQueue[0].m.cont;
+      if (!more) beep(3);
       $("rv-radio").classList.remove("talking");
       setTimeout(() => {
-        engineerTalking = false;
+        if (!radioBusy || !more) engineerTalking = false;
         // after an answer the driver can follow up without the wake word
         if (m.reply && mic) listenFor(7000);
-      }, 400);
-      await new Promise((r) => setTimeout(r, 350));
+      }, more ? 0 : 400);
+      if (!more) await wait(300);
     }
   }
   radioBusy = false;
@@ -500,8 +517,8 @@ async function pollRadio() {
       radioSince = Math.max(radioSince, m.id);
       radioQueue.push({ m, tts: res.tts });
     }
-    if (radioQueue.length) playQueue();
   } catch (e) { /* server restarting */ }
+  if (radioQueue.length) playQueue();      // also plays calls held back
 }
 $("rv-radio").addEventListener("click", () => {
   radioOn = !radioOn;
@@ -521,7 +538,7 @@ $("rv-radio").addEventListener("click", () => {
   }
 });
 paintRadioBtn();
-setInterval(pollRadio, 400);
+setInterval(pollRadio, 250);
 // browsers keep audio locked until the first touch/click on the page
 addEventListener("pointerdown", () => { if (radioOn) fxCtx(); }, { once: true });
 
@@ -577,6 +594,7 @@ async function sendPhrase(frames, retry = true) {
     const follow = Date.now() < followUntil;
     if (follow) followUntil = Date.now() + 15000;   // keep it open while we wait
     showSub({ text: "…", prio: 0 }, 2);
+    awaitingUntil = Date.now() + 15000;     // hold routine calls meanwhile
     const r = await fetch(`/api/radio/ask?sender=${encodeURIComponent(radioTarget)}&wake=${follow ? 0 : 1}`,
       { method: "POST", headers, body: wav(frames) });
     if (r.status === 401 && retry) {
@@ -585,6 +603,7 @@ async function sendPhrase(frames, retry = true) {
       return;
     }
     const res = await r.json();
+    if (!res.accepted || res.wake_only || res.error) awaitingUntil = 0;
     if (res.error && r.status !== 409) showSub({ text: "Radio: " + res.error, prio: 3 }, 2);
     else if (res.wake_only) {
       engineerTalking = true;               // don't hear our own chirp
@@ -624,7 +643,7 @@ function onFrame(x) {
   vad.frames.push(f);
   if (rms < th * 0.7) vad.quiet++; else { vad.quiet = 0; vad.voiced++; }
   const tooLong = vad.frames.length > (RATE * 12) / FRAME;
-  if (vad.quiet >= 15 || tooLong) {       // ~0.95 s of silence ends a phrase
+  if (vad.quiet >= 13 || tooLong) {       // ~0.8 s of silence ends a phrase
     const frames = vad.frames, voiced = vad.voiced;
     vad.speaking = false; vad.pre = []; vad.frames = []; vad.loud = 0;
     $("rv-mic").classList.remove("hearing");
