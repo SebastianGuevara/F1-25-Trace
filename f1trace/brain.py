@@ -200,7 +200,7 @@ def _request(driver, context, question, history, strategy, stream):
                  "Telemetría ahora mismo:\n%s\n\nPiloto: %s" % (
                      json.dumps(context, ensure_ascii=False,
                                 separators=(",", ":")), question)})
-    body = {"model": model, "max_tokens": 400, "stream": stream,
+    body = {"model": model, "max_tokens": 600, "stream": stream,
             "system": SYSTEM.format(driver=driver or "el piloto"),
             "messages": msgs}
     return urllib.request.Request(
@@ -217,7 +217,7 @@ def answer_stream(driver, context, question, history, strategy=False):
     """Claude's radio reply as it's written, one sentence at a time, so
     the first sentence can be voiced while the rest is still coming."""
     req = _request(driver, context, question, history, strategy, True)
-    buf = ""
+    buf, stop = "", None
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             for line in resp:
@@ -226,6 +226,8 @@ def answer_stream(driver, context, question, history, strategy=False):
                 ev = json.loads(line[5:])
                 if ev.get("type") == "error":
                     raise BrainError("Claude: %s" % ev.get("error"))
+                if ev.get("type") == "message_delta":
+                    stop = (ev.get("delta") or {}).get("stop_reason")
                 d = ev.get("delta") or {}
                 if d.get("type") != "text_delta":
                     continue
@@ -245,7 +247,11 @@ def answer_stream(driver, context, question, history, strategy=False):
         raise
     except Exception as e:
         raise BrainError("api.anthropic.com: %r" % e)
-    if buf.strip():
+    if stop and stop != "end_turn":
+        print("[engineer] Claude stop_reason: %s" % stop)
+    # a reply cut off by the token limit ends mid-word: don't say that bit
+    if buf.strip() and not (stop == "max_tokens" and
+                            not _SENTENCE_END.search(buf + " ")):
         yield buf.strip()
 
 

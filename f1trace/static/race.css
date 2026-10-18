@@ -262,3 +262,5 @@ body.stale #rv-grid { opacity: .45; }
 .rv-sub.me { border-color: #64748b; color: #cbd5e1; font-weight: 600; }
 .rv-sub.me.miss { opacity: .55; }
 #rv-mic.follow { background: #f59e0b; border-color: #f59e0b; color: #111; }
+#rv-radio.locked { background: #f59e0b; border-color: #f59e0b; color: #111;
+  animation: rv-talk .8s ease-in-out infinite alternate; }

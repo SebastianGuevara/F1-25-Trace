@@ -377,8 +377,9 @@ class RaceEngineer:
             self._on_lap(sender, st, p, r, race, names, now)
             st.pit_lap = not on_track
 
-        # --- position changes (held for 3 s so side-by-side doesn't flap)
-        if race and pos and lap >= 1:
+        # --- position changes (held for 3 s so side-by-side doesn't flap;
+        # the lap-1 scramble is summed up once lap 2 starts)
+        if race and pos and lap >= 2:
             if st.pos_seen is None or st.pos_seen[0] != pos:
                 st.pos_seen = (pos, now)
             if st.pos_said is None:
@@ -452,6 +453,14 @@ class RaceEngineer:
                         laptime_es(last), gap_es(last - prev_valid_best)), 0)
             elif last and best and last == best and prev_best and last < prev_best:
                 say("Vuelta rápida personal, %s. ¡Muy bien!" % laptime_es(last), 1)
+
+        if race and lap == 2 and r.get("grid") and r.get("position"):
+            d = r["grid"] - r["position"]
+            say("Primera vuelta hecha, P%d. %s" % (r["position"],
+                "Ganas %d posiciones, ¡buena salida!" % d if d > 1 else
+                "Ganas una posición." if d == 1 else
+                "Mantienes la posición." if d == 0 else
+                "Perdemos %d, tranquilo, carrera larga." % -d), 1)
 
         if race and total:
             if lap == total:

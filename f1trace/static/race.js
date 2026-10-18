@@ -338,10 +338,26 @@ let radioSince = -1, radioSender = "", radioBusy = false, subTimer = 0;
 const radioQueue = [];
 let audioCtxUnlocked = false;
 
+/* Browsers keep audio locked until the page gets a click or a key.
+   With the radio remembered as ON from last time, nothing could be heard
+   (and calls were used up silently) until something was clicked — e.g.
+   the MIC button. Now calls wait, and the button asks for a touch. */
+const audioLocked = () => !fx || fx.state !== "running";
 function paintRadioBtn() {
   const b = $("rv-radio");
-  b.classList.toggle("on", radioOn);
-  b.textContent = radioOn ? "📻 RADIO ON" : "📻 RADIO";
+  const locked = radioOn && audioLocked();
+  b.classList.toggle("on", radioOn && !locked);
+  b.classList.toggle("locked", locked);
+  b.textContent = locked ? "📻 TOCA PARA OÍR" : radioOn ? "📻 RADIO ON" : "📻 RADIO";
+}
+function unlockAudio() {
+  if (!radioOn) return;
+  fxCtx();
+  if (!audioCtxUnlocked && window.speechSynthesis) {
+    speechSynthesis.speak(new SpeechSynthesisUtterance(""));
+    audioCtxUnlocked = true;
+  }
+  setTimeout(() => { paintRadioBtn(); playQueue(); }, 100);
 }
 function showSub(m, me = 0) {
   $("rv-sub-txt").textContent = m.text;
@@ -471,6 +487,7 @@ async function speak(m, tts) {
 let awaitingUntil = 0;
 const convoActive = () => vad.speaking || Date.now() < awaitingUntil || Date.now() < followUntil;
 function nextItem() {
+  if (radioOn && audioLocked()) return null;   // hold calls until audio unlocks
   let i = radioQueue.findIndex((x) => x.m.reply);
   if (i < 0) {
     if (vad.speaking) return null;
@@ -540,7 +557,10 @@ $("rv-radio").addEventListener("click", () => {
 paintRadioBtn();
 setInterval(pollRadio, 250);
 // browsers keep audio locked until the first touch/click on the page
-addEventListener("pointerdown", () => { if (radioOn) fxCtx(); }, { once: true });
+addEventListener("pointerdown", unlockAudio);
+addEventListener("keydown", unlockAudio);
+if (radioOn) { try { fxCtx(); } catch (e) { /* no audio */ } }
+setTimeout(paintRadioBtn, 300);
 
 /* hands-free talkback: the mic stays open; a simple voice-activity
    detector cuts each phrase (with a little pre-roll so the first word
