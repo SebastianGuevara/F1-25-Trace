@@ -753,7 +753,7 @@ class RaceEngineer:
         try:
             heard = brain.transcribe(
                 audio, "voz.webm" if "webm" in ctype else "voz.wav", ctype)
-            if not heard:
+            if not heard or brain.echoes_prompt(heard):
                 return {"heard": ""}
             if need_wake:
                 q = brain.strip_wake(heard)
@@ -786,7 +786,8 @@ class RaceEngineer:
                               "Repíteme en un momento.", 3, reply=True)
                     return {"heard": heard, "accepted": True, "error": str(e)}
             if not parts:
-                parts = ["No te he copiado bien, ¿me lo repites?"]
+                parts = ["Perdona, se me ha cortado la respuesta. "
+                         "Pregúntamelo otra vez."]
                 self._say(sender, parts[0], 3, reply=True)
             st.qa = (st.qa + [(q, " ".join(parts))])[-8:]
             return {"heard": heard, "accepted": True}

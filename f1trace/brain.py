@@ -157,6 +157,14 @@ def _near(a, b):
 _NOISE = ("gracias", "subtitulos", "suscribete", "amara", "musica")
 
 
+def echoes_prompt(text):
+    """Speech-to-text fed silence or noise sometimes returns its own
+    vocabulary prompt word for word."""
+    w = _plain(text)
+    vocab = set(_plain(STT_PROMPT + wake_label()))
+    return len(w) >= 5 and sum(x in vocab for x in w) / len(w) > 0.6
+
+
 def looks_like_speech(text):
     w = _plain(text)
     return len(w) >= 1 and not any(n in " ".join(w) for n in _NOISE[1:]) \
@@ -200,7 +208,10 @@ def _request(driver, context, question, history, strategy, stream):
                  "Telemetría ahora mismo:\n%s\n\nPiloto: %s" % (
                      json.dumps(context, ensure_ascii=False,
                                 separators=(",", ":")), question)})
-    body = {"model": model, "max_tokens": 600, "stream": stream,
+    # no extended thinking: on the radio it burned the whole token budget
+    # before writing a word, so the driver got no answer at all
+    body = {"model": model, "max_tokens": 1024, "stream": stream,
+            "thinking": {"type": "disabled"},
             "system": SYSTEM.format(driver=driver or "el piloto"),
             "messages": msgs}
     return urllib.request.Request(
@@ -213,13 +224,27 @@ def _request(driver, context, question, history, strategy, stream):
 _SENTENCE_END = re.compile(r"[.!?…](?=\s)")
 
 
+def _open(driver, context, question, history, strategy):
+    req = _request(driver, context, question, history, strategy, True)
+    try:
+        return urllib.request.urlopen(req, timeout=30)
+    except urllib.error.HTTPError as e:
+        body = e.read()[:300].decode("utf-8", "replace")
+        if e.code == 400 and "thinking" in body:
+            # a model that doesn't take the switch: ask without it
+            data = json.loads(req.data)
+            data.pop("thinking", None)
+            req.data = json.dumps(data).encode()
+            return urllib.request.urlopen(req, timeout=30)
+        raise BrainError("api.anthropic.com HTTP %d: %s" % (e.code, body))
+
+
 def answer_stream(driver, context, question, history, strategy=False):
     """Claude's radio reply as it's written, one sentence at a time, so
     the first sentence can be voiced while the rest is still coming."""
-    req = _request(driver, context, question, history, strategy, True)
     buf, stop = "", None
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with _open(driver, context, question, history, strategy) as resp:
             for line in resp:
                 if not line.startswith(b"data:"):
                     continue
