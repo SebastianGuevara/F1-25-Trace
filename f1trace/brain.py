@@ -120,6 +120,28 @@ def wake_label():
     return os.environ.get("WAKE_WORDS", "").strip() or DEFAULT_WAKE
 
 
+def _near(a, b):
+    """Edit distance <= 1 (the transcriber writes "bro" as "pro", "brou")."""
+    if a == b:
+        return True
+    if abs(len(a) - len(b)) > 1 or len(b) < 3:
+        return False
+    if len(a) == len(b):
+        return sum(x != y for x, y in zip(a, b)) == 1
+    short, long_ = sorted((a, b), key=len)
+    return any(long_[:i] + long_[i + 1:] == short for i in range(len(long_)))
+
+
+# what Whisper-style models write for silence / noise
+_NOISE = ("gracias", "subtitulos", "suscribete", "amara", "musica")
+
+
+def looks_like_speech(text):
+    w = _plain(text)
+    return len(w) >= 1 and not any(n in " ".join(w) for n in _NOISE[1:]) \
+        and w != ["gracias"]
+
+
 def wake_words():
     return [tuple(_plain(w)) for w in wake_label().split(",") if _plain(w)]
 
@@ -135,7 +157,8 @@ def strip_wake(text):
         n = len(ww)
         # first or second word, so "oye bono" works but not mid-sentence
         for j in range(0, min(2, len(words) - n + 1)):
-            if tuple(words[j:j + n]) == ww:
+            if all(_near(a, b) for a, b in zip(words[j:j + n], ww)) \
+                    and len(words[j:j + n]) == n:
                 rest = raw[toks[j + n - 1][0] + 1:]
                 return " ".join(rest).strip(" ,.:;¿?¡!") or ""
     return None

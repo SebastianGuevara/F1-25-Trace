@@ -391,9 +391,14 @@ async function playQueue() {
     if (radioOn) {
       $("rv-radio").classList.add("talking");
       engineerTalking = true;
+      beep(1);
       await speak(m, tts);
       $("rv-radio").classList.remove("talking");
-      setTimeout(() => { engineerTalking = false; }, 400);
+      setTimeout(() => {
+        engineerTalking = false;
+        // after an answer the driver can follow up without the wake word
+        if (m.reply && mic) listenFor(7000);
+      }, 400);
       await new Promise((r) => setTimeout(r, 350));
     }
   }
@@ -430,7 +435,7 @@ $("rv-radio").addEventListener("click", () => {
   }
 });
 paintRadioBtn();
-setInterval(pollRadio, 700);
+setInterval(pollRadio, 400);
 
 /* hands-free talkback: the mic stays open; a simple voice-activity
    detector cuts each phrase (with a little pre-roll so the first word
@@ -438,6 +443,30 @@ setInterval(pollRadio, 700);
    and only answers phrases that start with a wake word ("radio…").
    The mic is ignored while the engineer is talking. */
 let engineerTalking = false;
+let followUntil = 0;      // until then, phrases need no wake word
+let beepCtx = null;
+
+/* F1-style radio blip: rising = "I'm listening", falling = end of call */
+function beep(kind) {
+  try {
+    beepCtx = beepCtx || new AudioContext();
+    const t = beepCtx.currentTime, o = beepCtx.createOscillator(), g = beepCtx.createGain();
+    o.type = "sine";
+    const [a, b] = kind === 2 ? [880, 1320] : [1320, 990];
+    o.frequency.setValueAtTime(a, t);
+    o.frequency.setValueAtTime(b, t + 0.07);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.18, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+    o.connect(g).connect(beepCtx.destination);
+    o.start(t); o.stop(t + 0.16);
+  } catch (e) { /* no audio: fine */ }
+}
+function listenFor(ms) {
+  followUntil = Date.now() + ms;
+  $("rv-mic").classList.add("follow");
+  setTimeout(() => { if (Date.now() >= followUntil) $("rv-mic").classList.remove("follow"); }, ms + 50);
+}
 let wakeLabel = "radio";
 fetch("/api/status").then((r) => r.json()).then((st) => {
   if (st.radio?.wake) {
@@ -474,7 +503,10 @@ async function sendPhrase(frames, retry = true) {
   const tok = store.get("f1trace.radioToken");
   if (tok) headers["X-Radio-Token"] = tok;
   try {
-    const r = await fetch(`/api/radio/ask?sender=${encodeURIComponent(radioTarget)}`,
+    const follow = Date.now() < followUntil;
+    if (follow) followUntil = Date.now() + 15000;   // keep it open while we wait
+    showSub({ text: "…", prio: 0 }, 2);
+    const r = await fetch(`/api/radio/ask?sender=${encodeURIComponent(radioTarget)}&wake=${follow ? 0 : 1}`,
       { method: "POST", headers, body: wav(frames) });
     if (r.status === 401 && retry) {
       const t = prompt("Radio token (RADIO_TOKEN in the server's .env):");
@@ -483,7 +515,16 @@ async function sendPhrase(frames, retry = true) {
     }
     const res = await r.json();
     if (res.error && r.status !== 409) showSub({ text: "Radio: " + res.error, prio: 3 }, 2);
-    else if (res.heard) showSub({ text: res.heard, prio: 0 }, res.accepted ? 1 : 2);
+    else if (res.wake_only) {
+      beep(2);
+      listenFor(8000);
+      showSub({ text: "Te escucho…", prio: 0 }, 1);
+    } else if (res.heard) {
+      showSub({ text: res.heard, prio: 0 }, res.accepted ? 1 : 2);
+      if (res.accepted) followUntil = 0;   // answer on its way
+      else if (follow) followUntil = 0;
+    } else if (follow) followUntil = 0;
+    if (!followUntil) $("rv-mic").classList.remove("follow");
   } catch (e) { /* network hiccup: drop the phrase */ }
 }
 function onFrame(x) {
@@ -511,11 +552,11 @@ function onFrame(x) {
   vad.frames.push(f);
   if (rms < th * 0.7) vad.quiet++; else { vad.quiet = 0; vad.voiced++; }
   const tooLong = vad.frames.length > (RATE * 12) / FRAME;
-  if (vad.quiet >= 12 || tooLong) {       // ~0.75 s of silence ends a phrase
+  if (vad.quiet >= 15 || tooLong) {       // ~0.95 s of silence ends a phrase
     const frames = vad.frames, voiced = vad.voiced;
     vad.speaking = false; vad.pre = []; vad.frames = []; vad.loud = 0;
     $("rv-mic").classList.remove("hearing");
-    if (voiced >= 6) sendPhrase(frames);  // skip clicks and coughs
+    if (voiced >= 4) sendPhrase(frames);  // skip clicks; a lone "bro" is ~4
   }
 }
 async function startMic() {

@@ -118,6 +118,7 @@ class RaceEngineer:
         self._next_id = 1
         self._audio = collections.OrderedDict()      # msg id -> mp3 bytes
         self._audio_events = {}
+        self._replies = collections.deque(maxlen=50)   # ids answering the driver
         self.el_key = os.environ.get("ELEVENLABS_API_KEY", "").strip()
         self.el_voice = (os.environ.get("ELEVENLABS_VOICE_ID", "").strip()
                          or "pNInz6obpgDQGcFmaJgB")
@@ -151,7 +152,8 @@ class RaceEngineer:
             st = self._senders.setdefault(sender, _Sender())
             st.listened = time.time()
             last = self._next_id - 1
-            out = [{"id": i, "t": t, "text": tx, "prio": p}
+            out = [{"id": i, "t": t, "text": tx, "prio": p,
+                    "reply": i in self._replies}
                    for (i, s, t, tx, p) in self._msgs
                    if s == sender and i > since]
         return {"last_id": last, "messages": out,
@@ -194,10 +196,12 @@ class RaceEngineer:
 
     # -------------------------------------------------------- core
 
-    def _say(self, sender, text, prio=1):
+    def _say(self, sender, text, prio=1, reply=False):
         with self._lock:
             mid = self._next_id
             self._next_id += 1
+            if reply:
+                self._replies.append(mid)
             self._msgs.append((mid, sender, time.time(), text, prio))
             st = self._senders.get(sender)
             listening = st is not None and time.time() - st.listened < 10
@@ -635,17 +639,23 @@ class RaceEngineer:
                 audio, "voz.webm" if "webm" in ctype else "voz.wav", ctype)
             if not heard:
                 return {"heard": ""}
-            q = brain.strip_wake(heard) if need_wake else heard
+            if need_wake:
+                q = brain.strip_wake(heard)
+            else:
+                # follow-up without wake word: drop noise transcriptions
+                # ("gracias", "subtítulos...") — a real question has words
+                q = heard if brain.looks_like_speech(heard) else None
             if q is None:
                 return {"heard": heard, "accepted": False}
             print("[engineer] %s pregunta: %s" % (sender, heard))
             if not q:
-                self._say(sender, "Te escucho.", 3)
-                return {"heard": heard, "accepted": True}
+                # just the wake word: the page beeps and listens for the
+                # question without needing the wake word again
+                return {"heard": heard, "accepted": True, "wake_only": True}
             text = brain.answer(st.driver, self._context(st), q, st.qa)
             if text:
                 st.qa = (st.qa + [(q, text)])[-6:]
-                self._say(sender, text, 3)
+                self._say(sender, text, 3, reply=True)
             return {"heard": heard, "accepted": True}
         except brain.BrainError as e:
             print("[engineer] ask: %s" % e)
