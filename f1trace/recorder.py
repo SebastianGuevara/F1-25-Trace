@@ -584,6 +584,7 @@ class Recorder(threading.Thread):
         dmg = self.damage.get(self.player_idx)
         sl = self.session_live or {}
         return {
+            "season": 2026 if (self.status.get("packet_format") or 0) >= 2026 else 2025,
             "position": cl.position, "num_cars": n_cars, "grid": cl.grid,
             "lap_num": cl.lap_num, "total_laps": sl.get("total_laps"),
             "last_lap_ms": cl.last_lap_ms, "best_lap_ms": r["best_ms"],

@@ -37,7 +37,7 @@ PARTS_ES = {
     "diffuser": "difusor", "sidepod": "pontón",
 }
 WEAR_STEPS = (40, 60, 75)
-SPEAK_EVERY_LAPS = 2       # race summary cadence
+SPEAK_EVERY_LAPS = 3       # race summary cadence
 STRATEGY_EVERY_LAPS = 8    # Claude strategy brief cadence (race)
 TIME_CALLS = (600, 300, 180, 60)   # session time left (s) worth a call
 
@@ -401,14 +401,18 @@ class RaceEngineer:
             if ga0 and ga1 and ga1 < 1000 <= ga0 \
                     and self._ready(st, "drs_ahead", 45, now):
                 who = names.get("ahead")
-                say("Estás a %s%s. Tienes DRS, a por él." % (
-                    gap_es(ga1), " de " + who if who else " del de delante"), 1)
+                say("Estás a %s%s. %s" % (
+                    gap_es(ga1), " de " + who if who else " del de delante",
+                    "Tienes overtake, úsalo en la recta." if r.get("season") == 2026
+                    else "Tienes DRS, a por él."), 1)
             gb0, gb1 = p.get("gap_behind_ms"), r.get("gap_behind_ms")
             if gb0 and gb1 and gb1 < 1000 <= gb0 \
                     and self._ready(st, "drs_behind", 45, now):
                 who = names.get("behind")
-                say("%s a %s detrás, tiene DRS. Defiende." % (
-                    who or "El de atrás", gap_es(gb1)), 2)
+                say("%s a %s detrás, %s. Defiende." % (
+                    who or "El de atrás", gap_es(gb1),
+                    "puede usar overtake" if r.get("season") == 2026
+                    else "tiene DRS"), 2)
 
         if race and lap >= 2 and on_track:
             self._rival_pit_rules(say, st, r, now)
@@ -495,16 +499,18 @@ class RaceEngineer:
 
         # race summary every few laps
         if race and lap >= 2 and lap % SPEAK_EVERY_LAPS == 0 and r.get("position"):
-            bits = ["Vuelta %d. P%d." % (lap, r["position"])]
-            if r.get("gap_front_ms"):
-                bits.append("Delante a %s." % gap_es(r["gap_front_ms"]))
-            if r.get("gap_behind_ms"):
-                bits.append("Detrás a %s." % gap_es(r["gap_behind_ms"]))
+            # one fact, the one that matters, not a list of numbers
+            bits = ["Vuelta %d, P%d." % (lap, r["position"])]
             trend = self._gap_trend(st)
+            gf, gb = r.get("gap_front_ms"), r.get("gap_behind_ms")
             if trend:
                 bits.append(trend)
-            elif last:
-                bits.append("Última vuelta %s." % laptime_es(last))
+            elif gb and gb < 1500 and (not gf or gb < gf):
+                bits.append("%s detrás." % gap_es(gb).capitalize())
+            elif gf and gf < 3000:
+                bits.append("A %s del de delante." % gap_es(gf))
+            elif last and best and last <= best + 300:
+                bits.append("Buen ritmo, sigue así.")
             say(" ".join(bits), 0)
 
         # Claude strategy brief now and then (only when someone listens)
@@ -694,6 +700,10 @@ class RaceEngineer:
         r["tyre_compound"] = COMPOUND_ES.get(ty.get("visual"))
         age = time.time() - live.get("updated_at", 0)
         return {
+            "season": r.get("season"),
+            "live": {"overtake": live.get("overtake"), "aero": live.get("aero"),
+                     "ers_pct": r.get("ers_pct"), "ers_mode": r.get("ers_mode"),
+                     "drs": live.get("drs")},
             "on_track": age < 3, "telemetry_age_s": int(age),
             "session": r.get("session_type"), "track": live.get("track_name"),
             "speed_kmh": live.get("speed"), "gear": live.get("gear"),
@@ -866,7 +876,9 @@ class RaceEngineer:
                 st.dmg_said[k] = v
             elif v < said - 20:
                 st.dmg_said[k] = v      # repaired
-        for k, label in (("drs_fault", "Fallo de DRS. No lo vas a tener."),
+        drs = ("Fallo en la aerodinámica activa." if r.get("season") == 2026
+               else "Fallo de DRS. No lo vas a tener.")
+        for k, label in (("drs_fault", drs),
                          ("ers_fault", "Fallo de ERS. Vas sin batería.")):
             if d.get(k) and not st.dmg_said.get(k):
                 say(label, 3)
