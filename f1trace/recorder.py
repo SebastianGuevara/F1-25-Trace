@@ -388,11 +388,13 @@ class Recorder(threading.Thread):
                            cl.last_lap_ms if cl.lap_num == buf.lap_num + 1 else 0)
             buf = self.bufs[idx] = LapBuffer(cl.lap_num)
 
-        if cl.lap_distance < 0 or cl.current_lap_ms <= 0:
-            return
+        # Before the line (out lap from the garage: negative distance) or
+        # with the lap timer stopped there's no lap to record, but the
+        # live view and the engineer still need the car.
+        recording = cl.lap_distance >= 0 and cl.current_lap_ms > 0
 
         samples = buf.samples
-        if samples:
+        if samples and recording:
             last = samples[-1]
             if cl.current_lap_ms == last[0]:
                 return  # duplicate frame
@@ -406,7 +408,7 @@ class Recorder(threading.Thread):
                     samples.pop()
                 buf.invalid = bool(cl.invalid)
 
-        if cl.invalid:
+        if cl.invalid and recording:
             buf.invalid = True
         if cl.s1_ms:
             buf.s1_ms = cl.s1_ms
@@ -420,25 +422,26 @@ class Recorder(threading.Thread):
         st = self.car_status.get(idx) or {}
         t2 = self.telem2.get(idx) or {}
         tt = t.get("tyre_temp") or (0, 0, 0, 0)
-        samples.append((
-            cl.current_lap_ms,
-            round(cl.lap_distance, 1),
-            round(m[0], 2), round(m[1], 2), round(m[2], 2),
-            t.get("speed", 0),
-            int(round((t.get("throttle") or 0.0) * 100)),
-            int(round((t.get("brake") or 0.0) * 100)),
-            int(round((t.get("steer") or 0.0) * 100)),
-            t.get("gear", 0),
-            1 if t.get("drs") else 0,
-            1 if t2.get("overtake") else 0,
-            t.get("rpm", 0),
-            tt[2], tt[3], tt[0], tt[1],  # order RL,RR,FL,FR on wire; store FL,FR,RL,RR
-            round(st.get("fuel", 0.0), 2),
-            round((st.get("ers_store") or 0.0) / 1e6, 3),
-            1 if t2.get("aero_mode") else 0,  # 2026: X-mode(1)/Z-mode(0)
-            # ERS deploy mode: 0 none, 1 medium, 2 hotlap, 3 overtake (boost)
-            int(st.get("ers_mode") or 0),
-        ))
+        if recording:
+            samples.append((
+                cl.current_lap_ms,
+                round(cl.lap_distance, 1),
+                round(m[0], 2), round(m[1], 2), round(m[2], 2),
+                t.get("speed", 0),
+                int(round((t.get("throttle") or 0.0) * 100)),
+                int(round((t.get("brake") or 0.0) * 100)),
+                int(round((t.get("steer") or 0.0) * 100)),
+                t.get("gear", 0),
+                1 if t.get("drs") else 0,
+                1 if t2.get("overtake") else 0,
+                t.get("rpm", 0),
+                tt[2], tt[3], tt[0], tt[1],  # order RL,RR,FL,FR on wire; store FL,FR,RL,RR
+                round(st.get("fuel", 0.0), 2),
+                round((st.get("ers_store") or 0.0) / 1e6, 3),
+                1 if t2.get("aero_mode") else 0,  # 2026: X-mode(1)/Z-mode(0)
+                # ERS deploy mode: 0 none, 1 medium, 2 hotlap, 3 overtake (boost)
+                int(st.get("ers_mode") or 0),
+            ))
 
         # Downsample current lap samples to at most ~500 points for progressive chart painting
         trail = None
@@ -468,7 +471,7 @@ class Recorder(threading.Thread):
             "team_name": ids.team_name(self.teams.get(idx)),
             "lap_num": cl.lap_num,
             "lap_time_ms": cl.current_lap_ms,
-            "distance": round(cl.lap_distance, 1),
+            "distance": round(max(0.0, cl.lap_distance), 1),
             "x": round(m[0], 2),
             "y": round(m[1], 2),
             "z": round(m[2], 2),
