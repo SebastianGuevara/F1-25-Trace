@@ -216,7 +216,11 @@ engineer calls out, in Spanish:
   pit window (with the rejoin position), a summary every 2 laps with the
   gap trend, and a short Claude strategy read every 8 laps;
 - practice / qualifying: lap time vs your best, sector deltas, invalid
-  laps, tyres up to temperature after the out lap, time left.
+  laps, tyres up to temperature after the out lap, time left;
+- across the weekend: each session (best lap and rank, stints with wear
+  per lap, fuel per lap, setup, what you talked about) is kept in
+  `data/weekend.json`, so in quali or the race the engineer remembers
+  practice, and gives a short briefing when a new session starts.
 
 **🎙 MIC** opens the microphone hands-free (no button to press): start a
 phrase with the wake word (*radio* or *ingeniero* by default) — "Radio,

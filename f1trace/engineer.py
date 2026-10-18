@@ -40,6 +40,21 @@ WEAR_STEPS = (40, 60, 75)
 SPEAK_EVERY_LAPS = 3       # race summary cadence
 STRATEGY_EVERY_LAPS = 8    # Claude strategy brief cadence (race)
 TIME_CALLS = (600, 300, 180, 60)   # session time left (s) worth a call
+# Weekend memory: what each session taught us (pace, tyres, fuel, chat)
+# carries into the next one at the same track — practice -> quali -> race.
+SESSION_ES = {1: "Práctica 1", 2: "Práctica 2", 3: "Práctica 3",
+              4: "Práctica corta", 5: "Q1", 6: "Q2", 7: "Q3",
+              8: "Clasificación corta", 9: "Clasificación a una vuelta",
+              10: "Sprint Shootout 1", 11: "Sprint Shootout 2",
+              12: "Sprint Shootout 3", 13: "Sprint Shootout corto",
+              14: "Sprint Shootout a una vuelta",
+              15: "Carrera", 16: "Carrera 2", 17: "Carrera 3"}
+WEEKEND_GAP_S = 12 * 3600   # longer pause than this starts a new weekend
+
+
+def _stage(session_type):
+    """1 practice, 2 qualifying / shootout, 3 race."""
+    return 3 if session_type in RACE_SESSIONS else 2 if session_type >= 5 else 1
 
 # Rough list prices for the usage estimate (USD). Claude per million
 # tokens (input, output) by model family; speech-to-text per minute.
@@ -126,6 +141,8 @@ class _Sender:
         self.pace = None          # last pace call id (push_* / manage_*)
         self.pace_lap = 0
         self.pit_lap = False      # this lap started in / went through the pits
+        self.started = time.time()
+        self.briefed = False      # weekend briefing given this session
 
 
 class RaceEngineer:
@@ -144,6 +161,15 @@ class RaceEngineer:
             except (OSError, ValueError):
                 pass
         brain.usage_hook = self._add_usage
+        self.weekend_path = (os.path.join(os.path.dirname(usage_path),
+                                          "weekend.json") if usage_path else None)
+        self._weekends = {}        # "driver|track_id" -> weekend memory
+        if self.weekend_path:
+            try:
+                with open(self.weekend_path, encoding="utf-8") as f:
+                    self._weekends = json.load(f) or {}
+            except (OSError, ValueError):
+                pass
         self._msgs = collections.deque(maxlen=200)   # (id, sender, t, text, prio)
         self._next_id = 1
         self._audio = collections.OrderedDict()      # msg id -> mp3 bytes
@@ -375,7 +401,8 @@ class RaceEngineer:
         st.live, st.driver = live, live.get("driver_name")
         st.session_type = session_type
         sess = (live.get("track_id"), session_type)
-        if st.session != sess:        # new session: forget everything
+        if st.session != sess:        # new session: start over, keep the weekend
+            self._save_session(st)
             listened = st.listened
             st.__init__()
             st.listened, st.session = listened, sess
@@ -385,6 +412,7 @@ class RaceEngineer:
             # joining mid-session: don't read out time marks already passed
             tl = r.get("time_left") or 0
             st.time_said = {x for x in TIME_CALLS if tl and tl <= x}
+            self._open_weekend(st)
             return
         p, st.prev = st.prev, r
         if p is None:
@@ -392,6 +420,7 @@ class RaceEngineer:
         try:
             self._rules(sender, st, p, r, live, session_type in RACE_SESSIONS,
                         names, now)
+            self._maybe_brief(sender, st, r, live, now)
         except Exception as e:      # a rule bug must never stop recording
             print("[engineer] rule error: %r" % e)
 
@@ -588,6 +617,8 @@ class RaceEngineer:
                 bits.append("Buen ritmo, sigue así.")
             say(" ".join(bits), 0)
 
+        self._save_session(st)
+
         # Claude strategy brief now and then (only when someone listens)
         if race and total and lap >= 4 and lap % STRATEGY_EVERY_LAPS == 0 \
                 and total - lap >= 3 and brain.llm_ready() \
@@ -764,6 +795,167 @@ class RaceEngineer:
                 st.was_cold = False
                 say("Gomas en temperatura, puedes empujar.", 1)
 
+    # -------------------------------------------------------- weekend
+
+    @staticmethod
+    def _weekend_key(st):
+        if not st.session or st.session[1] not in SESSION_ES:
+            return None          # time trial / unknown: nothing to carry
+        return "%s|%s" % (st.driver or "?", st.session[0])
+
+    def _open_weekend(self, st):
+        """A session starts: keep the weekend at this track unless it's
+        stale or we went back a stage (practice after the race = new one)."""
+        key = self._weekend_key(st)
+        if not key:
+            return
+        with self._lock:
+            wk = self._weekends.get(key)
+            if wk and (time.time() - wk.get("updated", 0) > WEEKEND_GAP_S
+                       or _stage(st.session[1]) < max(
+                           [_stage(x["type"]) for x in wk["sessions"]] or [0])):
+                wk = None
+            if not wk:
+                self._weekends[key] = {
+                    "driver": st.driver,
+                    "track": (st.live or {}).get("track_name"),
+                    "updated": time.time(), "sessions": []}
+
+    def _session_record(self, st):
+        r = st.prev or {}
+        laps = st.laps
+        # stints: consecutive laps on the same set (compound + stop count)
+        stints = []
+        for x in laps:
+            k = (x.get("compound"), x.get("pit_stops"))
+            if not stints or stints[-1]["k"] != k:
+                stints.append({"k": k, "laps": []})
+            stints[-1]["laps"].append(x)
+        out_stints = []
+        for sn in stints:
+            ls = sn["laps"]
+            good = [x["ms"] for x in ls if x.get("ms") and x.get("valid")]
+            w = [x["wear_max"] for x in ls if x.get("wear_max") is not None]
+            a = [x["tyre_age"] for x in ls if x.get("tyre_age") is not None]
+            age_span = (a[-1] - a[0]) if len(a) > 1 else 0
+            out_stints.append({k: v for k, v in {
+                "compound": COMPOUND_ES.get(sn["k"][0]),
+                "laps": len(ls),
+                "tyre_age_end": a[-1] if a else None,
+                "best": laptime_es(min(good)) if good else None,
+                "avg": laptime_es(sum(good) / len(good)) if len(good) > 1 else None,
+                "wear_end_pct": round(w[-1]) if w else None,
+                "wear_per_lap_pct": (round((w[-1] - w[0]) / age_span, 1)
+                                     if len(w) > 1 and age_span > 0 else None),
+            }.items() if v is not None})
+        fuel = [x["fuel_kg"] for x in laps if x.get("fuel_kg") is not None]
+        burn = [a - b for a, b in zip(fuel, fuel[1:]) if 0 < a - b < 5]
+        mine = st.best_valid
+        others = {n: v for n, v in st.field_best.items() if n != st.driver}
+        rank = (1 + sum(1 for v in others.values() if v < mine)
+                if mine and others else None)
+        top = sorted(st.field_best.items(), key=lambda kv: kv[1])[:5]
+        rec = {
+            "id": st.started, "type": st.session[1],
+            "session": SESSION_ES.get(st.session[1]),
+            "laps": len(laps),
+            "best_lap": laptime_es(mine) if mine else None,
+            "best_rank_in_field": rank,
+            "final_position": r.get("position"),
+            "grid": r.get("grid") if st.session[1] in RACE_SESSIONS else None,
+            "pit_stops": r.get("pit_stops"),
+            "stints": out_stints,
+            "fuel_per_lap_kg": (round(sum(burn) / len(burn), 2)
+                                if burn else None),
+            "fastest_in_field": [{"name": n, "best": laptime_es(v)}
+                                 for n, v in top],
+            "setup": st.extra.get("setup"),
+            "chat": [{"piloto": q, "ingeniero": a} for q, a in st.qa[-4:]],
+        }
+        return {k: v for k, v in rec.items() if v not in (None, [], {})}
+
+    def _save_session(self, st):
+        """Store this session in the weekend memory (once per lap, after
+        each question and when the session ends) and write it to disk."""
+        key = self._weekend_key(st)
+        if not key or not (st.laps or st.qa):
+            return
+        try:
+            rec = self._session_record(st)
+        except Exception as e:
+            print("[engineer] weekend record: %r" % e)
+            return
+        with self._lock:
+            wk = self._weekends.get(key)
+            if not wk:
+                return
+            wk["sessions"] = [x for x in wk["sessions"]
+                              if x.get("id") != rec["id"]] + [rec]
+            wk["sessions"] = wk["sessions"][-8:]
+            wk["updated"] = time.time()
+            # forget weekends older than a week
+            cut = time.time() - 7 * 86400
+            self._weekends = {k: v for k, v in self._weekends.items()
+                              if v.get("updated", 0) > cut}
+            data = json.dumps(self._weekends, ensure_ascii=False)
+        if self.weekend_path:
+            try:
+                tmp = self.weekend_path + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    f.write(data)
+                os.replace(tmp, self.weekend_path)
+            except OSError as e:
+                print("[engineer] weekend save: %s" % e)
+
+    def _weekend_view(self, st):
+        """Earlier sessions of this weekend, for Claude."""
+        key = self._weekend_key(st)
+        with self._lock:
+            wk = self._weekends.get(key) if key else None
+            if not wk:
+                return None
+            prev = [x for x in wk["sessions"] if x.get("id") != st.started]
+        if not prev:
+            return None
+        # keep the setup only for the latest session, it's long
+        out = [dict(x) for x in prev]
+        for x in out[:-1]:
+            x.pop("setup", None)
+        for x in out:
+            x.pop("id", None)
+            x.pop("type", None)
+        return out
+
+    def _maybe_brief(self, sender, st, r, live, now):
+        """Once per session, when someone listens: a two-line briefing
+        with what the earlier sessions of the weekend taught us."""
+        if st.briefed or now - st.started < 8 or now - st.listened > 10:
+            return
+        race = st.session_type in RACE_SESSIONS
+        if race and ((r.get("lap_num") or 0) > 1 or (live.get("speed") or 0) > 30):
+            st.briefed = True      # lights are out: not the moment
+            return
+        st.briefed = True
+        if not brain.llm_ready() or not self._weekend_view(st):
+            return
+        threading.Thread(target=self._brief, args=(sender, st),
+                         daemon=True).start()
+
+    def _brief(self, sender, st):
+        try:
+            text = brain.answer(
+                st.driver, self._context(st),
+                "(Mensaje automático, no del piloto.) Empieza la sesión %s. "
+                "Con lo que aprendimos en las sesiones anteriores del fin "
+                "de semana (weekend), dale un briefing de radio: lo más "
+                "importante que sabemos y el objetivo de esta sesión. "
+                "Máximo 2 frases." % SESSION_ES.get(st.session_type, ""),
+                [])
+            if text:
+                self._say(sender, text, 1)
+        except brain.BrainError as e:
+            print("[engineer] briefing: %s" % e)
+
     # -------------------------------------------------------- brain
 
     def _context(self, st):
@@ -790,6 +982,7 @@ class RaceEngineer:
                              compound=COMPOUND_ES.get(x.get("compound")))
                         for x in st.laps[-15:]],
             "recent_radio_calls": [m[3] for m in list(self._msgs)[-6:]],
+            "weekend": self._weekend_view(st),
         }
 
     @staticmethod
@@ -875,6 +1068,7 @@ class RaceEngineer:
                          "Pregúntamelo otra vez."]
                 self._say(sender, parts[0], 3, reply=True)
             st.qa = (st.qa + [(q, " ".join(parts))])[-8:]
+            self._save_session(st)
             return {"heard": heard, "accepted": True}
         except brain.BrainError as e:
             print("[engineer] ask: %s" % e)

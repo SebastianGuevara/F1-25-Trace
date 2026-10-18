@@ -79,6 +79,11 @@ minutos, tiempo (0 despejado a 5 tormenta) y % de lluvia.
 neumático y edad, paradas. history: sus vueltas anteriores, para \
 tendencias de ritmo, desgaste y consumo. my_setup: su reglaje. assists: \
 sus ayudas.
+- weekend: las sesiones anteriores de este fin de semana en este \
+circuito (prácticas, clasificación...): mejor vuelta y puesto, tandas \
+por compuesto con desgaste por vuelta, consumo, reglaje y lo que \
+hablasteis. Úsalo como un ingeniero que estuvo ahí: "en la FP2 el medio \
+te duró bien", "sales P6 tras la quali". No lo recites entero.
 - Estrategia: razona con desgaste por vuelta, vueltas restantes, \
 ventana, posición al salir y pronóstico; da UNA recomendación clara.
 {regs}"""
