@@ -515,9 +515,10 @@ async function playQueue() {
       $("rv-radio").classList.remove("talking");
       setTimeout(() => {
         if (!radioBusy || !more) engineerTalking = false;
-        // after an answer the driver can follow up without the wake word
-        if (m.reply && mic) listenFor(7000);
-      }, more ? 0 : 400);
+        // the mic only listens without the wake word when the engineer
+        // has just asked the driver something
+        if (!more && m.reply && mic && /[?¿]\s*$/.test(m.text.trim())) listenFor(8000);
+      }, more ? 0 : 700);
       if (!more) await wait(300);
     }
   }
@@ -632,8 +633,9 @@ async function sendPhrase(frames, retry = true) {
       showSub({ text: "Te escucho…", prio: 0 }, 1);
     } else if (res.heard) {
       showSub({ text: res.heard, prio: 0 }, res.accepted ? 1 : 2);
-      // answer on its way; a phrase cut by a pause can still add to it
-      if (res.accepted) listenFor(5000);
+      // answer on its way: a phrase cut by a pause can still add to it
+      // for a few seconds (quietly — the mic doesn't light up for this)
+      if (res.accepted) followUntil = Date.now() + 4000;
       else if (follow) followUntil = 0;
     } else if (follow) followUntil = 0;
     if (!followUntil) $("rv-mic").classList.remove("follow");
