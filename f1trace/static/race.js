@@ -725,6 +725,43 @@ $("rv-mic").addEventListener("click", async () => {
 if (micOn) startMic().then((ok) => { micOn = ok; paintMicBtn(); });
 paintMicBtn();
 
+/* what the radio has cost so far: Claude and speech-to-text in dollars
+   (list-price estimate), ElevenLabs in characters */
+const usd = (v) => "$" + (v < 1 ? v.toFixed(3) : v.toFixed(2));
+let usageData = null;
+function paintUsagePop() {
+  if (!usageData) return;
+  const cols = [["HOY", usageData.today], ["DESDE ARRANQUE", usageData.since_start], ["TOTAL", usageData.total]];
+  const row = (label, f) => `<tr><td>${label}</td>${cols.map(([, u]) => `<td>${f(u)}</td>`).join("")}</tr>`;
+  $("rv-usage-pop").innerHTML = `<table>
+    <thead><tr><th></th>${cols.map(([h]) => `<th>${h}</th>`).join("")}</tr></thead>
+    ${row("Claude", (u) => `${usd(u.llm_usd)} <small>· ${u.llm_calls}</small>`)}
+    ${row("Tokens in / out", (u) => `${(u.llm_in / 1000).toFixed(1)}k / ${(u.llm_out / 1000).toFixed(1)}k`)}
+    ${row("OpenAI voz→texto", (u) => `${usd(u.stt_usd)} <small>· ${u.stt_min} min</small>`)}
+    ${row("ElevenLabs", (u) => `${u.tts_chars.toLocaleString()} car.`)}
+    <tr class="sum">${["Total $", ...cols.map(([, u]) => usd(u.usd))].map((x) => `<td>${x}</td>`).join("")}</tr>
+  </table><p>Estimado con precios de lista. ElevenLabs en caracteres (según tu plan).<br>
+  Lo exacto: console.anthropic.com · platform.openai.com/usage · elevenlabs.io</p>`;
+}
+async function refreshUsage() {
+  try {
+    const r = await fetch("/api/usage", { cache: "no-store" });
+    if (!r.ok) return;
+    usageData = await r.json();
+    const b = $("rv-usage");
+    b.style.display = "";
+    b.textContent = `$ ${usageData.today.usd.toFixed(2)} hoy`;
+    if ($("rv-usage-pop").style.display !== "none") paintUsagePop();
+  } catch (e) { /* server restarting */ }
+}
+$("rv-usage").addEventListener("click", () => {
+  const pop = $("rv-usage-pop");
+  pop.style.display = pop.style.display === "none" ? "" : "none";
+  paintUsagePop();
+});
+refreshUsage();
+setInterval(refreshUsage, 15000);
+
 applyPanels();
 buildCorners();
 paintDamage(null);

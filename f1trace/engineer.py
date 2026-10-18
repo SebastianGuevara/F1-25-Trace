@@ -41,6 +41,19 @@ SPEAK_EVERY_LAPS = 3       # race summary cadence
 STRATEGY_EVERY_LAPS = 8    # Claude strategy brief cadence (race)
 TIME_CALLS = (600, 300, 180, 60)   # session time left (s) worth a call
 
+# Rough list prices for the usage estimate (USD). Claude per million
+# tokens (input, output) by model family; speech-to-text per minute.
+# ElevenLabs is counted in characters/credits, its price depends on plan.
+LLM_PRICES = {"haiku": (1.0, 5.0), "sonnet": (3.0, 15.0), "opus": (5.0, 25.0)}
+STT_PRICES = {"gpt-4o-mini-transcribe": 0.003, "gpt-4o-transcribe": 0.006,
+              "whisper-1": 0.006}
+
+
+def _zero_usage():
+    return {"llm_calls": 0, "llm_in": 0, "llm_out": 0, "llm_usd": 0.0,
+            "stt_calls": 0, "stt_sec": 0.0, "stt_usd": 0.0,
+            "tts_calls": 0, "tts_chars": 0}
+
 
 def load_env(path):
     """KEY=value lines into os.environ (existing variables win)."""
@@ -116,9 +129,21 @@ class _Sender:
 
 
 class RaceEngineer:
-    def __init__(self):
+    def __init__(self, usage_path=None):
         self._lock = threading.Lock()
         self._senders = {}
+        self.usage_path = usage_path
+        self._usage = {"total": _zero_usage(), "days": {}}
+        self._usage_start = _zero_usage()      # since TRACE started
+        if usage_path:
+            try:
+                with open(usage_path, encoding="utf-8") as f:
+                    saved = json.load(f)
+                self._usage["total"].update(saved.get("total") or {})
+                self._usage["days"] = saved.get("days") or {}
+            except (OSError, ValueError):
+                pass
+        brain.usage_hook = self._add_usage
         self._msgs = collections.deque(maxlen=200)   # (id, sender, t, text, prio)
         self._next_id = 1
         self._audio = collections.OrderedDict()      # msg id -> mp3 bytes
@@ -136,6 +161,55 @@ class RaceEngineer:
         except ValueError:
             self.el_speed = 0.95
         self.last_tts_error = None
+
+    # -------------------------------------------------------- usage
+
+    def _add_usage(self, kind, model=None, input=0, output=0, seconds=0.0,
+                   chars=0):
+        d = _zero_usage()
+        if kind == "llm":
+            fam = next((k for k in LLM_PRICES if k in (model or "")), "sonnet")
+            pi, po = LLM_PRICES[fam]
+            d.update(llm_calls=1, llm_in=input, llm_out=output,
+                     llm_usd=(input * pi + output * po) / 1e6)
+        elif kind == "stt":
+            d.update(stt_calls=1, stt_sec=seconds,
+                     stt_usd=seconds / 60 * STT_PRICES.get(model, 0.006))
+        elif kind == "tts":
+            d.update(tts_calls=1, tts_chars=chars)
+        day = time.strftime("%Y-%m-%d")
+        with self._lock:
+            days = self._usage["days"]
+            for bucket in (self._usage["total"], self._usage_start,
+                           days.setdefault(day, _zero_usage())):
+                for k, v in d.items():
+                    bucket[k] = bucket.get(k, 0) + v
+            for old in sorted(days)[:-60]:      # keep two months of days
+                del days[old]
+            snap = json.dumps(self._usage)
+        if self.usage_path:
+            try:
+                tmp = self.usage_path + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    f.write(snap)
+                os.replace(tmp, self.usage_path)
+            except OSError:
+                pass
+
+    def usage(self):
+        def view(u):
+            u = dict(_zero_usage(), **u)
+            u["usd"] = round(u["llm_usd"] + u["stt_usd"], 4)
+            u["llm_usd"] = round(u["llm_usd"], 4)
+            u["stt_usd"] = round(u["stt_usd"], 4)
+            u["stt_min"] = round(u.pop("stt_sec") / 60, 2)
+            return u
+        with self._lock:
+            today = self._usage["days"].get(time.strftime("%Y-%m-%d"), {})
+            return {"today": view(today), "since_start": view(self._usage_start),
+                    "total": view(self._usage["total"]),
+                    "tts_model": self.el_model,
+                    "note": "estimado con precios de lista; ElevenLabs en caracteres"}
 
     # -------------------------------------------------------- public
 
@@ -249,6 +323,7 @@ class RaceEngineer:
             with urllib.request.urlopen(req, timeout=12) as resp:
                 data = resp.read()
             self.last_tts_error = None
+            self._add_usage("tts", chars=len(text))
         except urllib.error.HTTPError as e:
             self.last_tts_error = "ElevenLabs HTTP %d: %s" % (
                 e.code, e.read()[:200].decode("utf-8", "replace"))

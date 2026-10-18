@@ -264,3 +264,16 @@ body.stale #rv-grid { opacity: .45; }
 #rv-mic.follow { background: #f59e0b; border-color: #f59e0b; color: #111; }
 #rv-radio.locked { background: #f59e0b; border-color: #f59e0b; color: #111;
   animation: rv-talk .8s ease-in-out infinite alternate; }
+#rv-usage { font-variant-numeric: tabular-nums; }
+.rv-usage-pop {
+  position: fixed; top: 52px; right: 16px; z-index: 30;
+  max-width: calc(100vw - 32px); padding: 12px 14px; border-radius: 10px;
+  background: rgba(10, 14, 20, .97); border: 1px solid #334155;
+  font-size: 13px; color: #cbd5e1; box-shadow: 0 8px 30px rgba(0,0,0,.5);
+}
+.rv-usage-pop table { border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.rv-usage-pop th, .rv-usage-pop td { padding: 3px 10px; text-align: right; }
+.rv-usage-pop th:first-child, .rv-usage-pop td:first-child { text-align: left; color: #94a3b8; }
+.rv-usage-pop thead th { color: #f1f5f9; border-bottom: 1px solid #334155; }
+.rv-usage-pop tr.sum td { color: #f1f5f9; font-weight: 700; border-top: 1px solid #334155; }
+.rv-usage-pop p { margin: 8px 0 0; font-size: 11px; color: #64748b; }

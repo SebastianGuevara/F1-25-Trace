@@ -116,6 +116,8 @@ def make_handler(db_path, recorder, demo=False):
                     q = self._query()
                     return self._json(recorder.engineer.messages(
                         q.get("sender", ""), int(q.get("since") or 0)))
+                if path == "/api/usage" and recorder:
+                    return self._json(recorder.engineer.usage())
                 if path == "/api/radio/audio" and recorder:
                     audio = recorder.engineer.audio(int(self._query().get("id") or 0))
                     if not audio:

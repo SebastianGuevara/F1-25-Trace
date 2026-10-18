@@ -21,6 +21,7 @@
     <button data-panel="rv-damage">DAMAGE</button>
     <button data-panel="rv-drive">DRIVER</button>
   </div>
+  <button id="rv-usage" class="chip edge-chip" title="estimated API spend of the race engineer" style="display:none">$ –</button>
   <button id="rv-radio" class="chip edge-chip" title="race engineer on the radio (Spanish voice): calls out gaps, fuel, tyres, damage and flags">📻 RADIO</button>
   <button id="rv-mic" class="chip edge-chip" title="talk to the engineer hands-free: start with &quot;radio…&quot;, e.g. &quot;Radio, ¿cómo van las gomas?&quot; (needs HTTPS)">🎙 MIC</button>
   <select id="rv-sender" title="live player to follow" style="display:none"></select>
@@ -132,6 +133,8 @@
     </div>
   </section>
 </main>
+
+<div id="rv-usage-pop" class="rv-usage-pop" style="display:none"></div>
 
 <div id="rv-sub" class="rv-sub"><b>📻</b><span id="rv-sub-txt"></span></div>
 

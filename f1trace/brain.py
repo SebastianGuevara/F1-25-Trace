@@ -107,6 +107,27 @@ class BrainError(Exception):
     pass
 
 
+# set by the engineer: called as usage_hook(kind, **amounts) after every
+# paid call, to keep a running estimate of what the radio costs
+usage_hook = None
+
+
+def _report(kind, **kw):
+    if usage_hook:
+        try:
+            usage_hook(kind, **kw)
+        except Exception as e:     # bookkeeping must never break the radio
+            print("[engineer] usage: %r" % e)
+
+
+def wav_seconds(audio):
+    """Length of a PCM WAV clip (what the RACE page sends)."""
+    if audio[:4] != b"RIFF" or len(audio) < 44:
+        return 0.0
+    byte_rate = int.from_bytes(audio[28:32], "little")
+    return (len(audio) - 44) / byte_rate if byte_rate else 0.0
+
+
 def _post(url, body, headers, timeout=20):
     req = urllib.request.Request(url, data=body, headers=headers)
     try:
@@ -150,6 +171,7 @@ def transcribe(audio, filename="voz.wav", ctype="audio/wav"):
                 b"".join(parts),
                 {"Authorization": "Bearer " + key,
                  "Content-Type": "multipart/form-data; boundary=" + boundary})
+    _report("stt", model=model, seconds=wav_seconds(audio))
     return (res.get("text") or "").strip()
 
 
@@ -240,11 +262,13 @@ def _request(driver, context, question, history, strategy, stream):
                 else "(temporada 2025)",
                 regs=REGS_2026 if context.get("season") == 2026 else REGS_2025),
             "messages": msgs}
-    return urllib.request.Request(
+    req = urllib.request.Request(
         "https://api.anthropic.com/v1/messages",
         data=json.dumps(body).encode(),
         headers={"x-api-key": key, "anthropic-version": "2023-06-01",
                  "content-type": "application/json"})
+    req.model = model
+    return req
 
 
 _SENTENCE_END = re.compile(r"[.!?…](?=\s)")
@@ -253,7 +277,7 @@ _SENTENCE_END = re.compile(r"[.!?…](?=\s)")
 def _open(driver, context, question, history, strategy):
     req = _request(driver, context, question, history, strategy, True)
     try:
-        return urllib.request.urlopen(req, timeout=30)
+        return req.model, urllib.request.urlopen(req, timeout=30)
     except urllib.error.HTTPError as e:
         body = e.read()[:300].decode("utf-8", "replace")
         if e.code == 400 and "thinking" in body:
@@ -261,7 +285,7 @@ def _open(driver, context, question, history, strategy):
             data = json.loads(req.data)
             data.pop("thinking", None)
             req.data = json.dumps(data).encode()
-            return urllib.request.urlopen(req, timeout=30)
+            return req.model, urllib.request.urlopen(req, timeout=30)
         raise BrainError("api.anthropic.com HTTP %d: %s" % (e.code, body))
 
 
@@ -269,12 +293,21 @@ def answer_stream(driver, context, question, history, strategy=False):
     """Claude's radio reply as it's written, one sentence at a time, so
     the first sentence can be voiced while the rest is still coming."""
     buf, stop = "", None
+    used, model = {"input": 0, "output": 0}, None
     try:
-        with _open(driver, context, question, history, strategy) as resp:
+        model, conn = _open(driver, context, question, history, strategy)
+        with conn as resp:
             for line in resp:
                 if not line.startswith(b"data:"):
                     continue
                 ev = json.loads(line[5:])
+                u = ((ev.get("message") or {}).get("usage") or ev.get("usage") or {})
+                if u.get("input_tokens"):
+                    used["input"] = (u["input_tokens"]
+                                     + (u.get("cache_read_input_tokens") or 0)
+                                     + (u.get("cache_creation_input_tokens") or 0))
+                if u.get("output_tokens"):
+                    used["output"] = u["output_tokens"]
                 if ev.get("type") == "error":
                     raise BrainError("Claude: %s" % ev.get("error"))
                 if ev.get("type") == "message_delta":
@@ -298,6 +331,9 @@ def answer_stream(driver, context, question, history, strategy=False):
         raise
     except Exception as e:
         raise BrainError("api.anthropic.com: %r" % e)
+    finally:
+        if used["input"] or used["output"]:
+            _report("llm", model=model, **used)
     if stop and stop != "end_turn":
         print("[engineer] Claude stop_reason: %s" % stop)
     # a reply cut off by the token limit ends mid-word: don't say that bit

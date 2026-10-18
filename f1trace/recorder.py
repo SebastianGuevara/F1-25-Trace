@@ -58,7 +58,8 @@ class Recorder(threading.Thread):
         self._status_lock = threading.Lock()
         self.live_telemetry = {"active": False}
         self.live_players = {}   # sender "ip:port" -> latest live telemetry
-        self.engineer = engineer_mod.RaceEngineer()
+        self.engineer = engineer_mod.RaceEngineer(os.path.join(
+            os.path.dirname(os.path.abspath(db_path)), "usage.json"))
         self._reset_session_state(None)
 
     def _load_drivers(self):
