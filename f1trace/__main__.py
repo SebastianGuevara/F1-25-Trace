@@ -3,6 +3,7 @@
 import argparse
 import os
 import shutil
+import sys
 import socket
 import tempfile
 import webbrowser
@@ -47,6 +48,8 @@ def main():
     ap.add_argument("--no-browser", action="store_true",
                     help="don't open the viewer in a browser on startup")
     args = ap.parse_args()
+    # line-buffered so logs show up live under systemd / journalctl
+    sys.stdout.reconfigure(line_buffering=True)
     # API keys for the race engineer's voice (ELEVENLABS_API_KEY, ...)
     engineer.load_env(os.path.join(os.path.dirname(os.path.dirname(
         os.path.abspath(__file__))), ".env"))

@@ -612,7 +612,8 @@ async function sendPhrase(frames, retry = true) {
       showSub({ text: "Te escucho…", prio: 0 }, 1);
     } else if (res.heard) {
       showSub({ text: res.heard, prio: 0 }, res.accepted ? 1 : 2);
-      if (res.accepted) followUntil = 0;   // answer on its way
+      // answer on its way; a phrase cut by a pause can still add to it
+      if (res.accepted) listenFor(5000);
       else if (follow) followUntil = 0;
     } else if (follow) followUntil = 0;
     if (!followUntil) $("rv-mic").classList.remove("follow");
@@ -643,7 +644,9 @@ function onFrame(x) {
   vad.frames.push(f);
   if (rms < th * 0.7) vad.quiet++; else { vad.quiet = 0; vad.voiced++; }
   const tooLong = vad.frames.length > (RATE * 12) / FRAME;
-  if (vad.quiet >= 13 || tooLong) {       // ~0.8 s of silence ends a phrase
+  // ~1.1 s of silence ends a phrase: shorter cuts questions in half
+  // when the driver pauses to think (or brakes for a corner)
+  if (vad.quiet >= 17 || tooLong) {
     const frames = vad.frames, voiced = vad.voiced;
     vad.speaking = false; vad.pre = []; vad.frames = []; vad.loud = 0;
     $("rv-mic").classList.remove("hearing");

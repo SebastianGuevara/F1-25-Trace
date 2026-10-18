@@ -104,6 +104,7 @@ class _Sender:
         self.pit_said = set()
         self.qa = []              # [(question, answer)] radio conversation
         self.asking = False
+        self.ask_lock = threading.Lock()
         self.driver = None
         self.live = None          # latest live snapshot (for questions)
         self.session_type = None
@@ -734,9 +735,11 @@ class RaceEngineer:
         answer with Claude through the normal radio queue."""
         with self._lock:
             st = self._senders.setdefault(sender, _Sender())
-            if st.asking:
-                return {"heard": None, "busy": True}
-            st.asking = True
+        # one phrase at a time per driver: a phrase that arrives while the
+        # previous one is still being answered waits instead of being lost
+        if not st.ask_lock.acquire(timeout=20):
+            return {"heard": None, "busy": True}
+        st.asking = True
         t0 = time.time()
         try:
             heard = brain.transcribe(
@@ -783,6 +786,7 @@ class RaceEngineer:
             return {"heard": None, "error": str(e)}
         finally:
             st.asking = False
+            st.ask_lock.release()
 
     def _tyre_rules(self, say, st, r, lap, on_track, speed, now):
         ty = r.get("tyres") or {}

@@ -49,7 +49,7 @@ jobs:
             Type=simple
             User=opc
             WorkingDirectory=/home/opc/F1-25-Trace
-            ExecStart=/usr/bin/python3 -m f1trace --host 0.0.0.0 --http-port 8020 --udp-port 20777
+            ExecStart=/usr/bin/python3 -u -m f1trace --host 0.0.0.0 --http-port 8020 --udp-port 20777
             Restart=always
             RestartSec=5
 
