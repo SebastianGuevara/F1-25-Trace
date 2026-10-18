@@ -137,13 +137,15 @@ class Recorder(threading.Thread):
         self.damage = {}           # car_idx -> CarDamage dict
         self.session_live = None   # latest Session packet (weather, SC, ...)
         self.race = {"lap": None, "start_fuel": None, "used": [], "best_ms": 0}
+        self.rivals = {}           # car_idx -> (tyre_visual, tyre_age), every car
+        self.extra_t = 0.0         # last time the engineer got the full field
 
     _CTX_ATTRS = (
         "session_uid", "session_row_id", "session_info", "track_length",
         "player_idx", "bufs", "motion", "telem", "car_status", "telem2",
         "setups", "teams", "driver_names", "sess_assists", "pb_idx",
         "rival_idx", "tt", "ghost_bufs", "stored_ghost_times",
-        "damage", "session_live", "race")
+        "damage", "session_live", "race", "rivals", "extra_t")
 
     def _switch_sender(self, addr):
         """Each sender (IP:port) has its own session/lap state. Without
@@ -285,6 +287,13 @@ class Recorder(threading.Thread):
             self.telem.update(packets.parse_car_telemetry(data, fmt, self._wanted()))
         elif pid == packets.CAR_STATUS:
             self.car_status.update(packets.parse_car_status(data, fmt, self._wanted()))
+            # every car's tyres, for the engineer's view of the field (1 Hz)
+            if time.time() - getattr(self, "_rivals_t", 0) >= 1.0:
+                self._rivals_t = time.time()
+                allst = packets.parse_car_status(
+                    data, fmt, range(packets.num_cars(fmt)))
+                self.rivals = {i: (v["tyre_visual"], v["tyre_age"])
+                               for i, v in allst.items()}
         elif pid == packets.CAR_DAMAGE:
             self.damage.update(packets.parse_car_damage(data, fmt, self._wanted()))
         elif pid == packets.CAR_TELEMETRY2 and fmt >= 2026:
@@ -486,7 +495,7 @@ class Recorder(threading.Thread):
             self.engineer.observe(
                 sender, self.live_telemetry,
                 self.session_live.get("session_type"),
-                self._neighbour_names(cars, cl))
+                self._neighbour_names(cars, cl), self._engineer_extra(cars))
 
         self._set_status(
             live={
@@ -502,6 +511,39 @@ class Recorder(threading.Thread):
             cars={str(i): {"role": "player", "lap_num": b.lap_num,
                            "samples": len(b.samples)}
                   for i, b in self.bufs.items()})
+
+    def _engineer_extra(self, cars):
+        """Once a second: the whole field, the player's setup and assists,
+        for the engineer's answers. None in between (it keeps the last)."""
+        now = time.time()
+        if now - self.extra_t < 1.0:
+            return None
+        self.extra_t = now
+        field = []
+        for i, c in cars.items():
+            if not c.position or c.result_status < 2:
+                continue
+            n = self.driver_names.get(i)
+            if i == self.player_idx:
+                n = self._resolve_player_name(n)
+            tyre = self.rivals.get(i)
+            field.append({
+                "pos": c.position, "name": n,
+                "team": ids.team_name(self.teams.get(i)),
+                "me": i == self.player_idx, "lap": c.lap_num,
+                "last_lap_ms": c.last_lap_ms or None,
+                "gap_leader_ms": c.gap_leader_ms if c.position > 1 else 0,
+                "gap_front_ms": c.gap_front_ms if c.position > 1 else 0,
+                "pit_stops": c.pit_stops, "in_pit": c.pit_status > 0,
+                "penalties_s": c.penalties_s,
+                "tyre_visual": tyre[0] if tyre else None,
+                "tyre_age": tyre[1] if tyre else None,
+                "finished": c.result_status == 3,
+            })
+        field.sort(key=lambda x: x["pos"])
+        return {"field": field,
+                "setup": self.setups.get(self.player_idx),
+                "assists": self.sess_assists}
 
     def _neighbour_names(self, cars, cl):
         """Names of the cars just ahead / behind, when they look real."""

@@ -107,6 +107,8 @@ class _Sender:
         self.driver = None
         self.live = None          # latest live snapshot (for questions)
         self.session_type = None
+        self.extra = {}           # whole field, setup, assists (1 Hz)
+        self.field_best = {}      # driver name -> best lap ms seen
         self.pit_lap = False      # this lap started in / went through the pits
 
 
@@ -272,11 +274,17 @@ class RaceEngineer:
         t0 = st.since.setdefault(key, now)
         return now - t0 >= secs
 
-    def observe(self, sender, live, session_type, names):
+    def observe(self, sender, live, session_type, names, extra=None):
         """Called by the recorder on every lap-data update of a sender."""
         now = time.time()
         with self._lock:
             st = self._senders.setdefault(sender, _Sender())
+        if extra:
+            st.extra = extra
+            for c in extra.get("field") or []:
+                ms, n = c.get("last_lap_ms"), c.get("name")
+                if ms and n and (n not in st.field_best or ms < st.field_best[n]):
+                    st.field_best[n] = ms
         if now - st.last_obs < 0.25:
             return
         st.last_obs = now
@@ -607,11 +615,33 @@ class RaceEngineer:
             "session": r.get("session_type"), "track": live.get("track_name"),
             "speed_kmh": live.get("speed"), "gear": live.get("gear"),
             "now": r,
+            "field": self._field(st),
+            "my_setup": st.extra.get("setup"),
+            "assists": st.extra.get("assists"),
             "history": [dict({k: v for k, v in x.items() if k != "ms"},
                              compound=COMPOUND_ES.get(x.get("compound")))
                         for x in st.laps[-15:]],
             "recent_radio_calls": [m[3] for m in list(self._msgs)[-6:]],
         }
+
+    @staticmethod
+    def _field(st):
+        out = []
+        for c in st.extra.get("field") or []:
+            best = st.field_best.get(c.get("name"))
+            out.append({
+                "pos": c["pos"], "name": c.get("name"), "team": c.get("team"),
+                "me": c.get("me") or None,
+                "gap_leader": gap_es(c["gap_leader_ms"]) if c.get("gap_leader_ms") else None,
+                "gap_front": gap_es(c["gap_front_ms"]) if c.get("gap_front_ms") else None,
+                "last_lap": laptime_es(c["last_lap_ms"]) if c.get("last_lap_ms") else None,
+                "best_lap_seen": laptime_es(best) if best else None,
+                "tyre": COMPOUND_ES.get(c.get("tyre_visual")),
+                "tyre_age": c.get("tyre_age"), "pit_stops": c.get("pit_stops"),
+                "in_pit": c.get("in_pit") or None,
+                "penalties_s": c.get("penalties_s") or None,
+            })
+        return [{k: v for k, v in x.items() if v is not None} for x in out]
 
     def _strategy_brief(self, sender, st):
         try:
@@ -652,10 +682,17 @@ class RaceEngineer:
                 # just the wake word: the page beeps and listens for the
                 # question without needing the wake word again
                 return {"heard": heard, "accepted": True, "wake_only": True}
-            text = brain.answer(st.driver, self._context(st), q, st.qa)
-            if text:
-                st.qa = (st.qa + [(q, text)])[-6:]
-                self._say(sender, text, 3, reply=True)
+            try:
+                text = brain.answer(st.driver, self._context(st), q, st.qa)
+            except brain.BrainError as e:
+                print("[engineer] answer: %s" % e)
+                self._say(sender, "Perdona, tengo problemas en el muro. "
+                          "Repíteme en un momento.", 3, reply=True)
+                return {"heard": heard, "accepted": True, "error": str(e)}
+            if not text:
+                text = "No te he copiado bien, ¿me lo repites?"
+            st.qa = (st.qa + [(q, text)])[-6:]
+            self._say(sender, text, 3, reply=True)
             return {"heard": heard, "accepted": True}
         except brain.BrainError as e:
             print("[engineer] ask: %s" % e)
