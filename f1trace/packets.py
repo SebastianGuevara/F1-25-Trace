@@ -80,12 +80,30 @@ def parse_session(data):
         safety_car = data[HEADER.size + 124]  # 0 none, 1 SC, 2 VSC, 3 formation
         network_game = data[HEADER.size + 125]
     time_left = struct.unpack_from("<H", data, HEADER.size + 9)[0]
+    # weather forecast (64 x 8 B samples) and the pit window sit after the
+    # marshal zones; same offsets as the assist block arithmetic below
+    forecast, pit_window = [], None
+    base = HEADER.size + 127
+    if len(data) >= HEADER.size + 656:
+        n = min(data[HEADER.size + 126], 64)
+        for i in range(n):
+            (f_sess, f_off, f_weather, f_track, _tc, f_air, _ac,
+             f_rain) = struct.unpack_from("<BBBbbbbB", data, base + i * 8)
+            if f_sess == session_type and f_weather <= 5 and f_rain <= 100:
+                forecast.append({"min": f_off, "weather": f_weather,
+                                 "track_temp": f_track, "air_temp": f_air,
+                                 "rain": f_rain})
+        ideal, latest, rejoin = struct.unpack_from(
+            "<BBB", data, HEADER.size + 653)
+        if ideal:
+            pit_window = {"ideal": ideal, "latest": latest, "rejoin": rejoin}
     return {
         "weather": weather, "track_temp": track_temp, "air_temp": air_temp,
         "total_laps": total_laps, "track_length": track_length,
         "session_type": session_type, "track_id": track_id, "formula": formula,
         "network_game": network_game,
         "safety_car": safety_car, "time_left": time_left,
+        "forecast": forecast, "pit_window": pit_window,
     }
 
 

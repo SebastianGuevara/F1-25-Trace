@@ -198,6 +198,8 @@ def make_handler(db_path, recorder, demo=False):
                             renamed_count += c.rowcount
                     con.commit()
                     return self._json({"ok": True, "name": new_name, "renamed": renamed_count})
+                if path == "/api/radio/ask" and recorder:
+                    return self.radio_ask()
                 if path == "/api/radio/check" and recorder:
                     sender = self._query().get("sender", "")
                     ok = recorder.engineer.radio_check(
@@ -393,6 +395,28 @@ def make_handler(db_path, recorder, demo=False):
                 return self._json({"error": "corrupt lap file"}, 400)
             return self._json({"ok": True, "lap_id": cur.lastrowid,
                                "track_id": track_id, "duplicate": False})
+
+        # ------------------------------------------------ radio
+
+        def radio_ask(self):
+            """Driver's voice clip -> transcription -> Claude answer, which
+            goes out through the normal radio queue. Only for a sender
+            that is on track right now, and behind RADIO_TOKEN when set,
+            since every call spends API credit."""
+            token = os.environ.get("RADIO_TOKEN", "").strip()
+            if token and self.headers.get("X-Radio-Token", "") != token:
+                return self._json({"error": "token"}, 401)
+            q = self._query()
+            sender = q.get("sender", "")
+            n = int(self.headers.get("Content-Length") or 0)
+            if not 0 < n <= 2 * 1024 * 1024:
+                return self._json({"error": "audio too large"}, 413)
+            audio = self.rfile.read(n)
+            if not recorder.get_live(sender).get("active"):
+                return self._json({"error": "not on track"}, 409)
+            ctype = self.headers.get("Content-Type", "audio/wav")
+            return self._json(recorder.engineer.ask(
+                sender, audio, ctype, need_wake=q.get("wake", "1") != "0"))
 
         # ------------------------------------------------ static
 

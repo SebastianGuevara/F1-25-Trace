@@ -206,22 +206,33 @@ outlines** for every 2026-calendar track including Madrid
 ## Race engineer radio
 
 The RACE page (`race.html`) has a **📻 RADIO** switch. With it on, an
-engineer calls out, in Spanish: safety car / VSC, penalties and track-limit
-warnings, rain, positions won or lost, DRS range ahead / behind, fuel
-target, tyre temperatures and wear, damage, and a short summary every few
-laps. Subtitles show on screen either way.
+engineer calls out, in Spanish:
 
-The voice uses ElevenLabs when the server has a key, otherwise the
-browser's own speech. Put the key in a `.env` file at the repo root (never
-committed):
+- every session: safety car / VSC, penalties and warnings, rain now and
+  in the forecast, tyre wear and damage, car damage, faults;
+- race: positions won or lost, DRS range ahead / behind, fuel target,
+  pit window (with the rejoin position), a summary every 2 laps with the
+  gap trend, and a short Claude strategy read every 8 laps;
+- practice / qualifying: lap time vs your best, sector deltas, invalid
+  laps, tyres up to temperature after the out lap, time left.
+
+**🎙 MIC** opens the microphone hands-free (no button to press): start a
+phrase with *radio*, *ingeniero*, *equipo* or *box* — "Radio, ¿cómo van
+las gomas?" — and the engineer answers on the radio, using the live
+telemetry and the lap history. The page must be opened over HTTPS for
+the browser to allow the microphone. Headphones work best.
+
+Keys go in a `.env` file at the repo root (never committed); restart
+TRACE after editing it:
 
 ```
-ELEVENLABS_API_KEY=...
-ELEVENLABS_VOICE_ID=...        # optional, any voice from your library
-ELEVENLABS_MODEL=eleven_flash_v2_5   # optional
+ELEVENLABS_API_KEY=...         # voice (else the browser speaks)
+ELEVENLABS_VOICE_ID=...        # optional
+OPENAI_API_KEY=...             # speech-to-text for the mic
+ANTHROPIC_API_KEY=...          # answers and strategy
+RADIO_TOKEN=...                # optional: the page asks for it once;
+                               # stops strangers spending your credit
 ```
-
-Restart TRACE after editing `.env`.
 
 ## Layout
 

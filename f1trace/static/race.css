@@ -256,3 +256,8 @@ body.stale #rv-grid { opacity: .45; }
 }
 .rv-sub.show { opacity: 1; transform: translate(-50%, 0); }
 .rv-sub.p3 { border-color: #f87171; }
+#rv-mic.on { background: #dc2626; border-color: #dc2626; color: #fff; }
+#rv-mic.hearing { animation: rv-hear .5s ease-in-out infinite alternate; }
+@keyframes rv-hear { to { box-shadow: 0 0 0 4px rgba(220,38,38,.5); } }
+.rv-sub.me { border-color: #64748b; color: #cbd5e1; font-weight: 600; }
+.rv-sub.me.miss { opacity: .55; }

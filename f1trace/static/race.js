@@ -338,10 +338,13 @@ function paintRadioBtn() {
   b.classList.toggle("on", radioOn);
   b.textContent = radioOn ? "📻 RADIO ON" : "📻 RADIO";
 }
-function showSub(m) {
+function showSub(m, me = 0) {
   $("rv-sub-txt").textContent = m.text;
   const el = $("rv-sub");
   el.classList.toggle("p3", m.prio >= 3);
+  el.classList.toggle("me", !!me);
+  el.classList.toggle("miss", me === 2);
+  el.querySelector("b").textContent = me ? "🎙" : "📻";
   el.classList.add("show");
   clearTimeout(subTimer);
   subTimer = setTimeout(() => el.classList.remove("show"), 4000 + m.text.length * 60);
@@ -382,8 +385,10 @@ async function playQueue() {
     showSub(m);
     if (radioOn) {
       $("rv-radio").classList.add("talking");
+      engineerTalking = true;
       await speak(m, tts);
       $("rv-radio").classList.remove("talking");
+      setTimeout(() => { engineerTalking = false; }, 400);
       await new Promise((r) => setTimeout(r, 350));
     }
   }
@@ -421,6 +426,133 @@ $("rv-radio").addEventListener("click", () => {
 });
 paintRadioBtn();
 setInterval(pollRadio, 700);
+
+/* hands-free talkback: the mic stays open; a simple voice-activity
+   detector cuts each phrase (with a little pre-roll so the first word
+   isn't clipped) and posts it as 16 kHz WAV. The server transcribes it
+   and only answers phrases that start with a wake word ("radio…").
+   The mic is ignored while the engineer is talking. */
+let engineerTalking = false;
+let mic = null;
+let micOn = store.get("f1trace.mic") === "1";
+const vad = { floor: 0.004, loud: 0, quiet: 0, speaking: false, pre: [], frames: [], voiced: 0 };
+const FRAME = 1024, RATE = 16000;
+
+function paintMicBtn() {
+  const b = $("rv-mic");
+  b.classList.toggle("on", micOn && !!mic);
+  b.textContent = micOn && mic ? "🎙 MIC ON" : "🎙 MIC";
+}
+function wav(frames) {
+  const n = frames.reduce((a, f) => a + f.length, 0);
+  const buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+  const str = (o, t) => [...t].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+  str(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); str(8, "WAVE"); str(12, "fmt ");
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, RATE, true); v.setUint32(28, RATE * 2, true);
+  v.setUint16(32, 2, true); v.setUint16(34, 16, true); str(36, "data"); v.setUint32(40, n * 2, true);
+  let o = 44;
+  for (const f of frames) for (let i = 0; i < f.length; i++, o += 2)
+    v.setInt16(o, Math.max(-1, Math.min(1, f[i])) * 0x7fff, true);
+  return new Blob([buf], { type: "audio/wav" });
+}
+async function sendPhrase(frames, retry = true) {
+  if (!sender) return;
+  const headers = { "Content-Type": "audio/wav" };
+  const tok = store.get("f1trace.radioToken");
+  if (tok) headers["X-Radio-Token"] = tok;
+  try {
+    const r = await fetch(`/api/radio/ask?sender=${encodeURIComponent(sender)}`,
+      { method: "POST", headers, body: wav(frames) });
+    if (r.status === 401 && retry) {
+      const t = prompt("Radio token (RADIO_TOKEN in the server's .env):");
+      if (t) { store.set("f1trace.radioToken", t.trim()); return sendPhrase(frames, false); }
+      return;
+    }
+    const res = await r.json();
+    if (res.error && r.status !== 409) showSub({ text: "Radio: " + res.error, prio: 3 }, 2);
+    else if (res.heard) showSub({ text: res.heard, prio: 0 }, res.accepted ? 1 : 2);
+  } catch (e) { /* network hiccup: drop the phrase */ }
+}
+function onFrame(x) {
+  const f = new Float32Array(x);
+  let sum = 0;
+  for (let i = 0; i < f.length; i++) sum += f[i] * f[i];
+  const rms = Math.sqrt(sum / f.length);
+  if (engineerTalking) {           // don't transcribe our own radio
+    vad.speaking = false; vad.pre = []; vad.loud = 0;
+    $("rv-mic").classList.remove("hearing");
+    return;
+  }
+  const th = Math.max(vad.floor * 3.5, 0.012);
+  if (!vad.speaking) {
+    vad.floor = Math.max(0.002, vad.floor * 0.97 + rms * 0.03);
+    vad.pre.push(f);
+    if (vad.pre.length > 6) vad.pre.shift();
+    vad.loud = rms > th ? vad.loud + 1 : 0;
+    if (vad.loud >= 3) {
+      vad.speaking = true; vad.frames = vad.pre.slice(); vad.quiet = 0; vad.voiced = vad.loud;
+      $("rv-mic").classList.add("hearing");
+    }
+    return;
+  }
+  vad.frames.push(f);
+  if (rms < th * 0.7) vad.quiet++; else { vad.quiet = 0; vad.voiced++; }
+  const tooLong = vad.frames.length > (RATE * 12) / FRAME;
+  if (vad.quiet >= 12 || tooLong) {       // ~0.75 s of silence ends a phrase
+    const frames = vad.frames, voiced = vad.voiced;
+    vad.speaking = false; vad.pre = []; vad.frames = []; vad.loud = 0;
+    $("rv-mic").classList.remove("hearing");
+    if (voiced >= 6) sendPhrase(frames);  // skip clicks and coughs
+  }
+}
+async function startMic() {
+  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+    showSub({ text: "El micrófono necesita HTTPS: abre https://pitwallsim.site/race.html", prio: 3 }, 2);
+    return false;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: {
+      echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
+    const ctx = new AudioContext({ sampleRate: RATE });
+    const src = ctx.createMediaStreamSource(stream);
+    const proc = ctx.createScriptProcessor(FRAME, 1, 1);
+    proc.onaudioprocess = (e) => onFrame(e.inputBuffer.getChannelData(0));
+    src.connect(proc);
+    proc.connect(ctx.destination);   // output stays silent; needed to run
+    if (ctx.state === "suspended") {
+      showSub({ text: "Toca la pantalla para abrir el micrófono", prio: 2 }, 2);
+      const go = () => { ctx.resume(); removeEventListener("pointerdown", go); };
+      addEventListener("pointerdown", go);
+    }
+    mic = { stream, ctx, proc, src };
+    return true;
+  } catch (e) {
+    showSub({ text: "No pude abrir el micrófono: " + (e.message || e.name), prio: 3 }, 2);
+    return false;
+  }
+}
+function stopMic() {
+  if (!mic) return;
+  mic.proc.disconnect(); mic.src.disconnect();
+  mic.stream.getTracks().forEach((t) => t.stop());
+  mic.ctx.close();
+  mic = null;
+}
+$("rv-mic").addEventListener("click", async () => {
+  if (micOn && mic) { micOn = false; stopMic(); }
+  else {
+    micOn = await startMic();
+    if (micOn) {
+      if (!radioOn) $("rv-radio").click();   // answers come over the radio
+      showSub({ text: "Micrófono abierto. Empieza con «radio», por ejemplo: «Radio, ¿cómo van las gomas?»", prio: 1 }, 1);
+    }
+  }
+  store.set("f1trace.mic", micOn ? "1" : "0");
+  paintMicBtn();
+});
+if (micOn) startMic().then((ok) => { micOn = ok; paintMicBtn(); });
+paintMicBtn();
 
 applyPanels();
 buildCorners();

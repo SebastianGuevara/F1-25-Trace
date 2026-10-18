@@ -19,11 +19,15 @@ import time
 import urllib.error
 import urllib.request
 
+from . import brain
+
 RACE_SESSIONS = {15, 16, 17}
 # tyre surface working window (°C) by visual compound family
 WINDOW = {"slick": (85, 105), "inter": (60, 80), "wet": (50, 70)}
 VISUAL_KIND = {16: "slick", 17: "slick", 18: "slick",
                7: "inter", 19: "inter", 8: "wet", 20: "wet"}
+COMPOUND_ES = {16: "blando", 17: "medio", 18: "duro", 7: "intermedio",
+               19: "intermedio", 8: "lluvia", 20: "lluvia"}
 CORNER_ES = ["delantero izquierdo", "delantero derecho",
              "trasero izquierdo", "trasero derecho"]
 PARTS_ES = {
@@ -33,7 +37,9 @@ PARTS_ES = {
     "diffuser": "difusor", "sidepod": "pontón",
 }
 WEAR_STEPS = (40, 60, 75)
-SPEAK_EVERY_LAPS = 3       # race summary cadence
+SPEAK_EVERY_LAPS = 2       # race summary cadence
+STRATEGY_EVERY_LAPS = 8    # Claude strategy brief cadence (race)
+TIME_CALLS = (600, 300, 180, 60)   # session time left (s) worth a call
 
 
 def load_env(path):
@@ -88,6 +94,20 @@ class _Sender:
         self.dmg_said = {}
         self.listened = 0.0       # last time a browser polled this sender
         self.session = None
+        self.laps = []            # completed-lap history for the brain
+        self.best_valid = 0       # best valid lap (ms), any session
+        self.best_s = [0, 0]      # best sector 1 / 2 (ms)
+        self.pending_sector = 0
+        self.time_said = set()
+        self.was_cold = False
+        self.rain_said = set()
+        self.pit_said = set()
+        self.qa = []              # [(question, answer)] radio conversation
+        self.asking = False
+        self.driver = None
+        self.live = None          # latest live snapshot (for questions)
+        self.session_type = None
+        self.pit_lap = False      # this lap started in / went through the pits
 
 
 class RaceEngineer:
@@ -109,7 +129,9 @@ class RaceEngineer:
 
     def info(self):
         return {"tts": "elevenlabs" if self.el_key else "browser",
-                "tts_error": self.last_tts_error}
+                "tts_error": self.last_tts_error,
+                "stt": brain.stt_ready(), "llm": brain.llm_ready(),
+                "token": bool(os.environ.get("RADIO_TOKEN", "").strip())}
 
     def messages(self, sender, since):
         """Calls for one sender newer than `since`; marks it as listened."""
@@ -245,12 +267,19 @@ class RaceEngineer:
         r = live.get("race")
         if not r:
             return
+        st.live, st.driver = live, live.get("driver_name")
+        st.session_type = session_type
         sess = (live.get("track_id"), session_type)
         if st.session != sess:        # new session: forget everything
             listened = st.listened
             st.__init__()
             st.listened, st.session = listened, sess
+            st.live, st.driver = live, live.get("driver_name")
+            st.session_type = session_type
             st.prev = r
+            # joining mid-session: don't read out time marks already passed
+            tl = r.get("time_left") or 0
+            st.time_said = {x for x in TIME_CALLS if tl and tl <= x}
             return
         p, st.prev = st.prev, r
         if p is None:
@@ -312,8 +341,11 @@ class RaceEngineer:
             st.cooldown["cold"] = now + 60
 
         # --- lap completed
+        if not on_track:
+            st.pit_lap = True
         if lap and p.get("lap_num") and lap == p["lap_num"] + 1:
             self._on_lap(sender, st, p, r, race, names, now)
+            st.pit_lap = not on_track
 
         # --- position changes (held for 3 s so side-by-side doesn't flap)
         if race and pos and lap >= 1:
@@ -349,6 +381,11 @@ class RaceEngineer:
 
         self._tyre_rules(say, st, r, lap, on_track, speed, now)
         self._damage_rules(say, st, r)
+        self._forecast_rules(say, st, r)
+        if race:
+            self._pit_window_rules(say, st, r)
+        else:
+            self._session_rules(say, st, p, r, lap, on_track, speed, now)
 
     def _on_lap(self, sender, st, p, r, race, names, now):
         say = lambda text, prio=1: self._say(sender, text, prio)
@@ -356,8 +393,33 @@ class RaceEngineer:
         last, best = r.get("last_lap_ms"), r.get("best_lap_ms")
         prev_best = p.get("best_lap_ms")
 
-        if last and best and last == best and prev_best and last < prev_best:
-            say("Vuelta rápida personal, %s. ¡Muy bien!" % laptime_es(last), 1)
+        valid = not p.get("lap_invalid")
+        ty = r.get("tyres") or {}
+        st.laps = (st.laps + [{
+            "lap": p.get("lap_num"), "time": laptime_es(last) if last else None,
+            "ms": last, "valid": valid, "pos": r.get("position"),
+            "fuel_kg": (r.get("fuel") or {}).get("kg"),
+            "wear_max": max(ty["wear"]) if ty.get("wear") else None,
+            "compound": ty.get("visual"), "tyre_age": ty.get("age"),
+            "gap_front_ms": r.get("gap_front_ms"),
+            "gap_behind_ms": r.get("gap_behind_ms"),
+            "pit_stops": r.get("pit_stops"),
+        }])[-60:]
+        if last and valid and not st.pit_lap:
+            is_best = not st.best_valid or last < st.best_valid
+            prev_valid_best = st.best_valid
+            if is_best:
+                st.best_valid = last
+            if not race:
+                if is_best:
+                    say("%s. Tu mejor vuelta%s." % (
+                        laptime_es(last),
+                        ", P%d" % r["position"] if r.get("position") else ""), 1)
+                elif prev_valid_best and last < prev_valid_best * 1.04:
+                    say("%s, a %s de tu mejor." % (
+                        laptime_es(last), gap_es(last - prev_valid_best)), 0)
+            elif last and best and last == best and prev_best and last < prev_best:
+                say("Vuelta rápida personal, %s. ¡Muy bien!" % laptime_es(last), 1)
 
         if race and total:
             if lap == total:
@@ -394,9 +456,188 @@ class RaceEngineer:
                 bits.append("Delante a %s." % gap_es(r["gap_front_ms"]))
             if r.get("gap_behind_ms"):
                 bits.append("Detrás a %s." % gap_es(r["gap_behind_ms"]))
-            if last:
+            trend = self._gap_trend(st)
+            if trend:
+                bits.append(trend)
+            elif last:
                 bits.append("Última vuelta %s." % laptime_es(last))
             say(" ".join(bits), 0)
+
+        # Claude strategy brief now and then (only when someone listens)
+        if race and total and lap >= 4 and lap % STRATEGY_EVERY_LAPS == 0 \
+                and total - lap >= 3 and brain.llm_ready() \
+                and now - st.listened < 10:
+            threading.Thread(target=self._strategy_brief, args=(sender, st),
+                             daemon=True).start()
+
+    @staticmethod
+    def _gap_trend(st):
+        """'Le recortas 3 décimas por vuelta' over the last 3 laps at an
+        unchanged position, or None."""
+        h = st.laps[-4:]
+        if len(h) < 4 or len({x["pos"] for x in h}) != 1 or \
+                not all(x["gap_front_ms"] for x in h):
+            return None
+        per = (h[-1]["gap_front_ms"] - h[0]["gap_front_ms"]) / 3
+        if abs(per) < 100:
+            return None
+        if per < 0:
+            return "Le recortas %s por vuelta al de delante." % gap_es(-per)
+        return "El de delante se escapa, %s por vuelta." % gap_es(per)
+
+    def _forecast_rules(self, say, st, r):
+        fc = r.get("forecast") or []
+        w = r.get("weather")
+        if w is None or not fc:
+            return
+        if w < 3:
+            nxt = next((f for f in fc if f["min"] > 0 and
+                        (f["weather"] >= 3 or f["rain"] >= 60)), None)
+            if nxt is None:
+                st.rain_said.discard("far")
+                st.rain_said.discard("near")
+                return
+            key = "near" if nxt["min"] <= 5 else "far"
+            if key not in st.rain_said:
+                st.rain_said.add(key)
+                say("Pronóstico: lluvia en unos %d minutos, probabilidad del %d%%."
+                    % (nxt["min"], nxt["rain"]), 2 if key == "near" else 1)
+        else:
+            st.rain_said.discard("far")
+            st.rain_said.discard("near")
+            nxt = next((f for f in fc if f["min"] > 0 and f["weather"] < 3
+                        and f["rain"] < 30), None)
+            if nxt and "dry" not in st.rain_said:
+                st.rain_said.add("dry")
+                say("Se espera que pare de llover en unos %d minutos." % nxt["min"], 1)
+
+    def _pit_window_rules(self, say, st, r):
+        pw, lap = r.get("pit_window"), r.get("lap_num") or 0
+        if not pw or (r.get("pit_stops") or 0) > 0:
+            return
+        if lap >= pw["ideal"] - 1 and "open" not in st.pit_said:
+            st.pit_said.add("open")
+            msg = "Se abre la ventana de parada. Vuelta ideal %d, como tarde la %d." % (
+                pw["ideal"], pw["latest"])
+            if pw.get("rejoin"):
+                msg += " Saldrías P%d." % pw["rejoin"]
+            say(msg, 2)
+        if pw["latest"] and lap >= pw["latest"] and "last" not in st.pit_said:
+            st.pit_said.add("last")
+            say("Última vuelta de la ventana. Si paramos, es ahora: box, box.", 3)
+
+    def _session_rules(self, say, st, p, r, lap, on_track, speed, now):
+        """Practice / qualifying: invalid laps, sector deltas, time left,
+        tyres ready after the out lap."""
+        if r.get("lap_invalid") and not p.get("lap_invalid") and \
+                (r.get("current_lap_ms") or 0) > 3000 and \
+                self._ready(st, "invalid", 20, now):
+            say("Vuelta anulada por límites de pista.", 2)
+
+        sec0, sec1 = p.get("sector"), r.get("sector")
+        if sec1 != sec0 and sec1 in (1, 2):
+            st.pending_sector = sec1
+        k = st.pending_sector
+        if k and not r.get("lap_invalid"):
+            t = r.get("s1_ms") if k == 1 else r.get("s2_ms")
+            if t:
+                st.pending_sector = 0
+                best = st.best_s[k - 1]
+                if best and t < best * 1.05:      # a push lap, not an out lap
+                    d = t - best
+                    if abs(d) >= 50:
+                        say("Sector %s, %s %s." % (
+                            "uno" if k == 1 else "dos", gap_es(abs(d)),
+                            "más rápido" if d < 0 else "más lento"), 0)
+                if not best or t < best:
+                    st.best_s[k - 1] = t
+        elif k and r.get("lap_invalid"):
+            st.pending_sector = 0
+
+        tl = r.get("time_left") or 0
+        for x in sorted(TIME_CALLS):
+            if tl and tl <= x and x not in st.time_said:
+                st.time_said.update(y for y in TIME_CALLS if y >= x)
+                if x == 60:
+                    say("Último minuto. Cruza la línea antes de cero para "
+                        "tener otra vuelta.", 2)
+                else:
+                    say("Quedan %d minutos de sesión." % (x // 60), 1)
+                break
+
+        ty = r.get("tyres") or {}
+        surf = ty.get("surface")
+        if surf and on_track:
+            lo = WINDOW[VISUAL_KIND.get(ty.get("visual"), "slick")][0]
+            cold = min(surf) < lo - 8
+            if self._held(st, "out_cold", cold, 10, now):
+                st.was_cold = True
+            if st.was_cold and min(surf) >= lo - 3 and speed > 120:
+                st.was_cold = False
+                say("Gomas en temperatura, puedes empujar.", 1)
+
+    # -------------------------------------------------------- brain
+
+    def _context(self, st):
+        live = st.live or {}
+        r = dict(live.get("race") or {})
+        r.pop("forecast", None)
+        r["forecast"] = (live.get("race") or {}).get("forecast", [])[:6]
+        ty = r.get("tyres") or {}
+        r["tyre_compound"] = COMPOUND_ES.get(ty.get("visual"))
+        return {
+            "session": r.get("session_type"), "track": live.get("track_name"),
+            "speed_kmh": live.get("speed"), "gear": live.get("gear"),
+            "now": r,
+            "history": [dict({k: v for k, v in x.items() if k != "ms"},
+                             compound=COMPOUND_ES.get(x.get("compound")))
+                        for x in st.laps[-15:]],
+            "recent_radio_calls": [m[3] for m in list(self._msgs)[-6:]],
+        }
+
+    def _strategy_brief(self, sender, st):
+        try:
+            text = brain.answer(
+                st.driver, self._context(st),
+                "(Mensaje automático, no del piloto.) Dame una lectura "
+                "estratégica breve: cómo vamos de neumáticos, gasolina y "
+                "ritmo, y qué conviene hacer ahora. Máximo 2 frases.",
+                [], strategy=True)
+            if text:
+                self._say(sender, text, 1)
+        except brain.BrainError as e:
+            print("[engineer] strategy: %s" % e)
+
+    def ask(self, sender, audio, ctype, need_wake=True):
+        """Driver spoke on the radio: transcribe, check the wake word,
+        answer with Claude through the normal radio queue."""
+        with self._lock:
+            st = self._senders.setdefault(sender, _Sender())
+            if st.asking:
+                return {"heard": None, "busy": True}
+            st.asking = True
+        try:
+            heard = brain.transcribe(
+                audio, "voz.webm" if "webm" in ctype else "voz.wav", ctype)
+            if not heard:
+                return {"heard": ""}
+            q = brain.strip_wake(heard) if need_wake else heard
+            if q is None:
+                return {"heard": heard, "accepted": False}
+            print("[engineer] %s pregunta: %s" % (sender, heard))
+            if not q:
+                self._say(sender, "Te escucho.", 3)
+                return {"heard": heard, "accepted": True}
+            text = brain.answer(st.driver, self._context(st), q, st.qa)
+            if text:
+                st.qa = (st.qa + [(q, text)])[-6:]
+                self._say(sender, text, 3)
+            return {"heard": heard, "accepted": True}
+        except brain.BrainError as e:
+            print("[engineer] ask: %s" % e)
+            return {"heard": None, "error": str(e)}
+        finally:
+            st.asking = False
 
     def _tyre_rules(self, say, st, r, lap, on_track, speed, now):
         ty = r.get("tyres") or {}
@@ -407,7 +648,8 @@ class RaceEngineer:
             for axle, ix, name in (("front", (0, 1), "Delanteros"),
                                    ("rear", (2, 3), "Traseros")):
                 avg = sum(surf[i] for i in ix) / 2
-                cold = avg < lo - 8 and lap >= 2 and (ty.get("age") or 0) >= 1
+                cold = (avg < lo - 8 and lap >= 2 and (ty.get("age") or 0) >= 1
+                        and st.session_type in RACE_SESSIONS)
                 hot = avg > hi + 5
                 if self._held(st, axle + "_cold", cold, 8, now) and \
                         now >= st.cooldown.get("cold", 0) and \

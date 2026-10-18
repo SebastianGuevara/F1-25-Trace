@@ -555,6 +555,11 @@ class Recorder(threading.Thread):
             "weather": sl.get("weather"), "track_temp": sl.get("track_temp"),
             "air_temp": sl.get("air_temp"), "safety_car": sl.get("safety_car", 0),
             "time_left": sl.get("time_left"),
+            "forecast": (sl.get("forecast") or [])[:8],
+            "pit_window": sl.get("pit_window"),
+            "current_lap_ms": cl.current_lap_ms,
+            "s1_ms": cl.s1_ms, "s2_ms": cl.s2_ms,
+            "lap_invalid": bool(cl.invalid),
             "tyres": {
                 "actual": st.get("tyre_actual"), "visual": st.get("tyre_visual"),
                 "age": st.get("tyre_age"),
