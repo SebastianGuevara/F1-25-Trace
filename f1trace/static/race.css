@@ -19,34 +19,40 @@ body.race-page { background: var(--bg); }
 .rv-flag.sc { background: #facc15; color: #1a1400; }
 .rv-flag.pit { background: #1d4ed8; color: #fff; }
 
+/* Panels are switchable (header chips, remembered). Wide screens: one
+   row, each panel's share set by --w so the tyres get the most room.
+   16:9: tyres on the left at full height, the rest stacked on the right.
+   Narrow: one scrolling column. */
 #rv-grid {
-  flex: 1; min-height: 0; display: grid; gap: 12px; padding: 16px 14px 12px;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
-  grid-template-areas: "standing tyres fuel" "damage tyres driver";
-  overflow: auto;
+  flex: 1; min-height: 0; gap: 12px; padding: 16px 14px 12px;
+  display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+  grid-auto-rows: minmax(0, 1fr); overflow: auto;
 }
-#rv-standing { grid-area: standing; }
-#rv-tyres { grid-area: tyres; }
-#rv-fuel { grid-area: fuel; }
-#rv-damage { grid-area: damage; }
-#rv-drive { grid-area: driver; }
-/* narrow screens (tablet / phone): one column, scrolls */
-@media (max-width: 1100px) {
-  #rv-grid { grid-template-columns: 1fr; grid-template-rows: none;
-             grid-template-areas: "standing" "tyres" "fuel" "damage" "driver"; }
-  #rv-tyres { min-height: 460px; }
+#rv-grid > .rv-panel { grid-column: 2; }
+#rv-standing, #rv-fuel { justify-content: space-between; }
+#rv-grid > #rv-tyres { grid-column: 1; }
+#rv-grid.solo { grid-template-columns: minmax(0, 1fr); }
+#rv-grid.no-tyres { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+#rv-grid.no-tyres > .rv-panel { grid-column: auto; }
+.rv-panel.off { display: none !important; }
+#rv-standing { --w: 1; }
+#rv-tyres { --w: 2.6; }
+#rv-fuel { --w: 1; }
+#rv-damage { --w: 1; }
+#rv-drive { --w: .8; }
+@media (min-aspect-ratio: 12/5) {
+  #rv-grid, #rv-grid.no-tyres, #rv-grid.solo { display: flex; overflow: hidden; }
+  #rv-grid > .rv-panel { flex: var(--w) 1 0; }
+}
+@media (max-width: 1100px) and (max-aspect-ratio: 12/5) {
+  #rv-grid, #rv-grid.no-tyres { grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; }
+  #rv-grid > .rv-panel { grid-column: 1 !important; grid-row: auto !important; }
+  #rv-tyres { min-height: 520px; }
   #rv-drive { min-height: 260px; }
 }
-/* very wide, short screens: one row, tyres get the most room */
-@media (min-aspect-ratio: 3/1) {
-  #rv-grid {
-    grid-template-columns: 1fr 1.7fr 1fr 1fr 0.9fr;
-    grid-template-rows: minmax(0, 1fr);
-    grid-template-areas: "standing tyres fuel damage driver";
-    overflow: hidden;
-  }
-}
+
+/* panel switches in the header */
+.rv-panels button { padding: 6px 12px; }
 
 .rv-panel {
   position: relative; min-width: 0; min-height: 0;
@@ -96,13 +102,13 @@ body.race-page { background: var(--bg); }
 
 /* ---------- tyres ---------- */
 .rv-tyre-grid {
-  flex: 1; min-height: 0; display: grid; gap: 10px;
-  grid-template-columns: minmax(0, 1fr) minmax(90px, .7fr) minmax(0, 1fr);
+  flex: 1; min-height: 0; display: grid; gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(70px, .42fr) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
 }
 .rv-car {
   grid-column: 2; grid-row: 1 / 3; min-height: 0;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
 }
 .rv-tyre-grid .rv-corner[data-i="0"] { grid-column: 1; grid-row: 1; }
 .rv-tyre-grid .rv-corner[data-i="1"] { grid-column: 3; grid-row: 1; }
@@ -115,27 +121,47 @@ body.race-page { background: var(--bg); }
 .rv-wheel { fill: #2a3242; stroke: #0b0c0f; stroke-width: 1.5; transition: fill .3s; }
 .rv-compound {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 38px; height: 38px; border-radius: 50%; border: 4px solid #94a3b8;
-  font-weight: 900; font-size: 18px; background: #0b0d13;
+  width: 46px; height: 46px; border-radius: 50%; border: 5px solid #94a3b8;
+  font-weight: 900; font-size: 22px; background: #0b0d13; flex: none;
 }
-.rv-age { font-size: 11px; font-weight: 700; letter-spacing: 1px; color: var(--dim); text-align: center; }
-.rv-age b { color: var(--text); font-size: 15px; }
+.rv-age { font-size: 11px; font-weight: 700; letter-spacing: 1px; color: var(--dim); text-align: center; line-height: 1.1; }
+.rv-age b { display: block; color: var(--text); font-size: 22px; font-style: italic; }
 
+/* one corner: numbers scale with the card (container query units) */
 .rv-corner {
-  min-width: 0; min-height: 0; border-radius: 8px; border: 1px solid #222a38;
-  background: rgba(0,0,0,.28); padding: 6px 9px;
-  display: grid; grid-template-columns: 1fr auto; align-content: space-between; gap: 2px 8px;
+  --tc: #4a5568;
+  container-type: size; min-width: 0; min-height: 0;
+  border-radius: 10px; padding: 8px 12px 10px;
+  border: 2px solid color-mix(in srgb, var(--tc) 60%, #222a38);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tc) 16%, transparent), rgba(0,0,0,.35) 70%);
+  display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; gap: 4px;
+  transition: border-color .3s;
 }
-.rv-corner .c-name { font-size: 10px; font-weight: 800; letter-spacing: 1.5px; color: var(--dim); }
+.rv-corner .c-head { display: flex; justify-content: space-between; align-items: baseline; }
+.rv-corner .c-name {
+  font-size: clamp(11px, 7cqh, 20px); font-weight: 800; letter-spacing: 2px; color: var(--text);
+}
+.rv-corner .c-psi { font-size: clamp(11px, 7cqh, 20px); font-weight: 700; color: #aab2bf; font-variant-numeric: tabular-nums; }
+.rv-corner .c-psi small { font-size: .6em; color: var(--dim); margin-left: 3px; letter-spacing: 1px; }
 .rv-corner .c-surf {
-  grid-column: 1 / 3; font-size: clamp(24px, 5vh, 40px); font-weight: 700; font-style: italic;
-  line-height: 1; transition: color .3s;
+  display: flex; align-items: baseline; align-content: center; flex-wrap: wrap; justify-content: center; gap: .15em;
+  font-size: clamp(28px, min(36cqh, 30cqw), 120px); font-weight: 700; font-style: italic;
+  line-height: 1; color: var(--tc); font-variant-numeric: tabular-nums; transition: color .3s;
 }
-.rv-corner .c-surf small { font-size: 12px; color: var(--dim); font-style: normal; margin-left: 4px; }
-.rv-corner .c-row { display: contents; font-size: 12px; }
-.rv-corner .c-row span { color: var(--dim); font-size: 10px; font-weight: 700; letter-spacing: 1px; }
-.rv-corner .c-row b { text-align: right; font-size: 13px; }
-.rv-corner .c-wear { grid-column: 1 / 3; height: 6px; border-radius: 3px; background: #1c2331; overflow: hidden; }
+.rv-corner .c-surf small {
+  font-size: clamp(9px, 5cqh, 14px); font-style: normal; font-weight: 700;
+  letter-spacing: 1.5px; color: var(--dim);
+}
+.rv-corner .c-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.rv-corner .c-stats > div {
+  display: flex; flex-direction: column; align-items: center; min-width: 0;
+  background: rgba(0,0,0,.3); border-radius: 6px; padding: 3px 2px;
+}
+.rv-corner .c-stats span {
+  font-size: clamp(8px, 4.5cqh, 12px); font-weight: 700; letter-spacing: 1px; color: var(--dim);
+}
+.rv-corner .c-stats b { font-size: clamp(13px, min(11cqh, 9cqw), 34px); font-weight: 700; line-height: 1.1; }
+.rv-corner .c-wear { height: clamp(5px, 3cqh, 10px); border-radius: 5px; background: #1c2331; overflow: hidden; }
 .rv-corner .c-wear i { display: block; height: 100%; width: 0; transition: width .4s, background .4s; }
 
 /* ---------- fuel / energy ---------- */
@@ -204,7 +230,7 @@ body.race-page { background: var(--bg); }
 body.stale #rv-grid { opacity: .45; }
 
 /* one-row layout: spread each panel over the full height, bigger numbers */
-@media (min-aspect-ratio: 3/1) {
+@media (min-aspect-ratio: 12/5) {
   #rv-standing, #rv-fuel { justify-content: space-between; }
   .rv-gap b { font-size: clamp(19px, 3.6vh, 28px); }
   .rv-times b, .rv-kv b { font-size: clamp(16px, 3vh, 22px); }

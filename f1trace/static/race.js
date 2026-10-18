@@ -36,6 +36,10 @@ const PU_PARTS = [
   ["es", "ENERGY STORE"], ["ce", "CONTROL ELEC."], ["tc", "TURBO"],
 ];
 
+// with the DAMAGE panel hidden, parts at or above this % still show up
+// as alerts in the STANDING panel
+const DAMAGE_ALERT = 20;
+
 const fmtTime = (ms) => {
   if (!ms) return "–";
   const m = Math.floor(ms / 60000), s = (ms % 60000) / 1000;
@@ -62,11 +66,13 @@ function buildCorners() {
   document.querySelectorAll(".rv-corner").forEach((el) => {
     const i = +el.dataset.i;
     el.innerHTML = `
-      <span class="c-name">${CORNERS[i]}</span><span class="c-name c-psi"></span>
+      <div class="c-head"><span class="c-name">${CORNERS[i]}</span><span class="c-psi">–</span></div>
       <div class="c-surf"><span class="c-surf-v">–</span><small>SURF</small></div>
-      <div class="c-row"><span>CARCASS</span><b class="c-inner">–</b></div>
-      <div class="c-row"><span>BRAKE</span><b class="c-brake">–</b></div>
-      <div class="c-row"><span>WEAR</span><b class="c-wear-v">–</b></div>
+      <div class="c-stats">
+        <div><span>CARCASS</span><b class="c-inner">–</b></div>
+        <div><span>BRAKE</span><b class="c-brake">–</b></div>
+        <div><span>WEAR</span><b class="c-wear-v">–</b></div>
+      </div>
       <div class="c-wear"><i></i></div>`;
   });
 }
@@ -77,19 +83,19 @@ function paintTyres(ty) {
   const comp = $("rv-compound");
   comp.textContent = t.code; comp.style.borderColor = comp.style.color = t.color;
   comp.title = t.name;
-  $("rv-age").innerHTML = ty.age != null ? `<b>${ty.age}</b> LAPS OLD` : "";
+  $("rv-age").innerHTML = ty.age != null ? `<b>${ty.age}</b>LAPS OLD` : "";
   document.querySelectorAll(".rv-corner").forEach((el) => {
     const i = +el.dataset.i;
     const surf = ty.surface?.[i], inner = ty.inner?.[i], brake = ty.brake?.[i];
     const wear = ty.wear?.[i], psi = ty.pressure?.[i];
     const sv = el.querySelector(".c-surf-v");
     sv.textContent = surf ? `${surf}°` : "–";
-    sv.parentElement.style.color = tempColor(surf, win);
+    el.style.setProperty("--tc", tempColor(surf, win));
     const ie = el.querySelector(".c-inner");
     ie.textContent = inner ? `${inner}°` : "–"; ie.style.color = tempColor(inner, win);
     const be = el.querySelector(".c-brake");
     be.textContent = brake ? `${brake}°` : "–"; be.style.color = brakeColor(brake);
-    el.querySelector(".c-psi").textContent = psi ? `${psi.toFixed(1)} PSI` : "";
+    el.querySelector(".c-psi").innerHTML = psi ? `${psi.toFixed(1)}<small>PSI</small>` : "–";
     const we = el.querySelector(".c-wear-v"), bar = el.querySelector(".c-wear i");
     if (wear != null) {
       we.textContent = `${wear.toFixed(0)}%`; we.style.color = wearColor(wear);
@@ -145,6 +151,13 @@ function paint(live) {
   if (r.penalties_s) tags.push(`<span class="rv-tag bad">+${r.penalties_s}s PEN</span>`);
   if (r.warnings) tags.push(`<span class="rv-tag warn">${r.warnings} WARN</span>`);
   if (live.invalid) tags.push('<span class="rv-tag bad">LAP INVALID</span>');
+  if ($("rv-damage").classList.contains("off") && r.damage) {
+    for (const [k, label] of BODY_PARTS.concat(PU_PARTS))
+      if (r.damage[k] >= DAMAGE_ALERT)
+        tags.push(`<span class="rv-tag ${r.damage[k] >= 50 ? "bad" : "warn"}">⚠ ${label} ${r.damage[k]}%</span>`);
+    if (r.damage.drs_fault) tags.push('<span class="rv-tag bad">⚠ DRS FAULT</span>');
+    if (r.damage.ers_fault) tags.push('<span class="rv-tag bad">⚠ ERS FAULT</span>');
+  }
   $("rv-tags").innerHTML = tags.join("");
 
   const flag = $("rv-flag");
@@ -164,7 +177,7 @@ function paint(live) {
     sp.textContent = `${fu.laps_surplus >= 0 ? "+" : ""}${fu.laps_surplus.toFixed(2)} LAPS`;
     sp.className = "rv-surplus " + (fu.laps_surplus >= 0 ? "rv-good" : "rv-bad");
   } else sp.textContent = "–";
-  set("rv-per-lap", fu.per_lap ? `${fu.per_lap.toFixed(2)} kg` : "after 1 lap");
+  set("rv-per-lap", fu.per_lap ? `${fu.per_lap.toFixed(2)} kg` : "–");
   set("rv-in-tank", fu.laps_left != null ? fu.laps_left.toFixed(1) : "–");
   set("rv-mix", MIX[fu.mix] || "–");
 
@@ -284,6 +297,35 @@ $("rv-fs").addEventListener("click", () => {
   else document.documentElement.requestFullscreen?.().catch(() => {});
 });
 
+/* panel switches: which panels show, remembered; damage and driver are
+   off by default so tyres, fuel and standing get the room */
+const PANELS = ["rv-standing", "rv-tyres", "rv-fuel", "rv-damage", "rv-drive"];
+let shown;
+try { shown = JSON.parse(store.get("f1trace.racePanels")); } catch (e) { shown = null; }
+if (!Array.isArray(shown) || !shown.length) shown = ["rv-standing", "rv-tyres", "rv-fuel"];
+
+function applyPanels() {
+  const grid = $("rv-grid");
+  PANELS.forEach((id) => $(id).classList.toggle("off", !shown.includes(id)));
+  document.querySelectorAll("#rv-panels button").forEach((b) =>
+    b.classList.toggle("on", shown.includes(b.dataset.panel)));
+  const others = shown.filter((id) => id !== "rv-tyres").length;
+  const tyres = shown.includes("rv-tyres");
+  grid.classList.toggle("no-tyres", !tyres);
+  grid.classList.toggle("solo", tyres && !others);
+  // 16:9 grid: tyres span every row of the stacked right-hand column
+  $("rv-tyres").style.gridRow = `1 / span ${Math.max(1, others)}`;
+}
+$("rv-panels").addEventListener("click", (e) => {
+  const id = e.target.closest("button")?.dataset.panel;
+  if (!id) return;
+  if (shown.includes(id)) { if (shown.length > 1) shown = shown.filter((x) => x !== id); }
+  else shown = PANELS.filter((x) => x === id || shown.includes(x));
+  store.set("f1trace.racePanels", JSON.stringify(shown));
+  applyPanels();
+});
+
+applyPanels();
 buildCorners();
 paintDamage(null);
 setInterval(tick, 100);
