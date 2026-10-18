@@ -193,22 +193,35 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 
 /* ---------------------------------------------------------------- polling */
 
-let sender = new URLSearchParams(location.search).get("sender") || "";
-let inFlight = false, lastOk = 0;
+/* Follow exactly one driver, by name: the one picked in the selector,
+   else this browser's own driver (set on the main page), else the only
+   one on track. Never "most recent sender" — with several players live
+   that alternates between them on every poll and mixes their data. */
+const store = {
+  get: (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } },
+};
+let follow = new URLSearchParams(location.search).get("driver")
+  || store.get("f1trace.raceFollow") || store.get("f1trace.myDriver") || "";
+let sender = "";          // ip:port of the followed driver, resolved from live_all
+let inFlight = false, lastOk = 0, waitMsg = "";
+const same = (a, b) => (a || "").trim().toLowerCase() === (b || "").trim().toLowerCase();
 
 async function tick() {
   if (inFlight) return;
-  inFlight = true;
-  try {
-    const q = sender ? "?sender=" + encodeURIComponent(sender) : "";
-    const live = await fetch("/api/live" + q, { cache: "no-store" }).then((r) => r.json());
-    if (live.active) {
-      lastOk = Date.now();
-      paint(live);
-    }
-  } catch (e) { /* server restarting: keep the last frame */ }
-  inFlight = false;
-  const fresh = Date.now() - lastOk < 3000;
+  if (sender) {
+    inFlight = true;
+    try {
+      const live = await fetch("/api/live?sender=" + encodeURIComponent(sender),
+                               { cache: "no-store" }).then((r) => r.json());
+      if (live.active && live.sender === sender) {
+        lastOk = Date.now();
+        paint(live);
+      }
+    } catch (e) { /* server restarting: keep the last frame */ }
+    inFlight = false;
+  }
+  const fresh = !!sender && Date.now() - lastOk < 3000;
   document.body.classList.toggle("stale", !fresh && lastOk > 0);
   $("rv-wait").classList.toggle("hide", fresh);
   const chip = $("rv-chip");
@@ -216,19 +229,55 @@ async function tick() {
   chip.textContent = fresh ? "LIVE" : "NO SIGNAL";
 }
 
-/* several players live at once: let the viewer pick whom to follow */
 async function refreshSenders() {
+  let all;
   try {
-    const all = await fetch("/api/live_all", { cache: "no-store" }).then((r) => r.json());
-    const sel = $("rv-sender");
-    sel.style.display = all.length > 1 ? "" : "none";
-    const opts = all.map((p) => `<option value="${esc(p.sender)}">${esc(p.driver_name || p.sender)}</option>`);
-    const html = '<option value="">MOST RECENT</option>' + opts.join("");
-    if (sel.dataset.html !== html) { sel.innerHTML = html; sel.dataset.html = html; }
-    sel.value = sender;
-  } catch (e) { /* ignore */ }
+    all = await fetch("/api/live_all", { cache: "no-store" }).then((r) => r.json());
+  } catch (e) { return; }
+  // one entry per live connection, keyed by driver name; a name shared by
+  // two connections (same public IP) is qualified with its ip:port
+  const count = {};
+  all.forEach((p) => { const k = (p.driver_name || "").toLowerCase(); count[k] = (count[k] || 0) + 1; });
+  const entries = all.map((p) => {
+    const name = p.driver_name || p.sender;
+    const dup = count[(p.driver_name || "").toLowerCase()] > 1;
+    return { key: dup ? `${name}@${p.sender}` : name,
+             label: name.toUpperCase() + (dup ? ` · ${p.sender.split(":").pop()}` : ""),
+             sender: p.sender, name };
+  });
+  const matches = (e) => (follow.includes("@") ? e.key === follow : same(e.name, follow));
+  let pick = follow ? entries.find(matches) : null;
+  if (!follow && entries.length === 1) pick = entries[0];
+  if (follow && !pick)
+    entries.push({ key: follow, label: follow.split("@")[0].toUpperCase() + " (OFF TRACK)" });
+
+  const sel = $("rv-sender");
+  sel.style.display = entries.length ? "" : "none";
+  const html = (follow ? "" : '<option value="">CHOOSE DRIVER…</option>') +
+    entries.map((e) => `<option value="${esc(e.key)}">${esc(e.label)}</option>`).join("");
+  if (sel.dataset.html !== html) { sel.innerHTML = html; sel.dataset.html = html; }
+  sel.value = pick ? pick.key : (follow || "");
+
+  const next = pick ? pick.sender : "";
+  if (next !== sender) { sender = next; lastOk = 0; document.body.classList.remove("stale"); }
+
+  const h = $("rv-wait").querySelector("h2"), p = $("rv-wait").querySelector("p");
+  if (!follow && all.length > 1) {
+    h.textContent = "Choose whose telemetry to follow";
+    p.textContent = "Several drivers are on track — pick one in the selector at the top.";
+  } else if (follow && !pick) {
+    h.textContent = `Waiting for ${follow.split("@")[0].toUpperCase()}`;
+    p.textContent = "Not on track right now — this page fills in as soon as they are.";
+  } else {
+    h.textContent = "Waiting for live telemetry";
+    p.textContent = "Get on track with UDP telemetry on — this page fills in by itself.";
+  }
 }
-$("rv-sender").addEventListener("change", (e) => { sender = e.target.value; });
+$("rv-sender").addEventListener("change", (e) => {
+  follow = e.target.value;
+  store.set("f1trace.raceFollow", follow);
+  refreshSenders();
+});
 
 $("rv-fs").addEventListener("click", () => {
   if (document.fullscreenElement) document.exitFullscreen();
@@ -238,5 +287,5 @@ $("rv-fs").addEventListener("click", () => {
 buildCorners();
 paintDamage(null);
 setInterval(tick, 100);
-setInterval(refreshSenders, 2000);
-tick(); refreshSenders();
+setInterval(refreshSenders, 1500);
+refreshSenders().then(tick);
