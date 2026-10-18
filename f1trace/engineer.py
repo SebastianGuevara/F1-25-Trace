@@ -14,6 +14,7 @@ root (see `load_env`); they never leave the server.
 import collections
 import json
 import os
+import re
 import threading
 import time
 import urllib.error
@@ -50,6 +51,9 @@ SESSION_ES = {1: "Práctica 1", 2: "Práctica 2", 3: "Práctica 3",
               14: "Sprint Shootout a una vuelta",
               15: "Carrera", 16: "Carrera 2", 17: "Carrera 3"}
 WEEKEND_GAP_S = 12 * 3600   # longer pause than this starts a new weekend
+# A page without telemetry yet (game in menus) talks on a "pilot:<id>"
+# radio; when the car shows up the page links it to the real sender.
+PILOT_RE = re.compile(r"^pilot:[A-Za-z0-9_-]{1,40}$")
 
 
 def _stage(session_type):
@@ -143,6 +147,7 @@ class _Sender:
         self.pit_lap = False      # this lap started in / went through the pits
         self.started = time.time()
         self.briefed = False      # weekend briefing given this session
+        self.greet = False        # say "I've got you" on the first telemetry
 
 
 class RaceEngineer:
@@ -247,7 +252,10 @@ class RaceEngineer:
                 "wake": brain.wake_label()}
 
     def knows(self, sender):
-        """True if this sender has sent telemetry since TRACE started."""
+        """True if this sender has sent telemetry since TRACE started,
+        or is a page's own radio waiting for the car (pilot:<id>)."""
+        if PILOT_RE.match(sender or ""):
+            return True
         with self._lock:
             st = self._senders.get(sender)
             return st is not None and st.live is not None
@@ -274,6 +282,9 @@ class RaceEngineer:
             st.cooldown["radio_check"] = time.time() + 5
         r = (live or {}).get("race") or {}
         bits = ["Radio check, te escucho fuerte y claro."]
+        if not r and st.live is None:
+            bits.append("Aún no veo el coche; en cuanto entres a la sesión "
+                        "te engancho.")
         if r.get("position"):
             bits.append("Vas P%d" % r["position"])
             if r.get("total_laps") and r.get("lap_num"):
@@ -281,6 +292,37 @@ class RaceEngineer:
             bits[-1] += "."
         self._say(sender, " ".join(bits), 2)
         return True
+
+    def link(self, old, new):
+        """The page's radio moves from `old` (its pilot:<id> radio, or the
+        game's previous ip:port) to `new`: the conversation goes with it,
+        and if the car is already there the engineer says so."""
+        if not self.knows(new) or old == new:
+            return False
+        with self._lock:
+            a = self._senders.get(old)
+            b = self._senders.setdefault(new, _Sender())
+        if a and a.qa:
+            b.qa = (a.qa + [x for x in b.qa if x not in a.qa])[-8:]
+            b.briefed = False      # react to what was said before the car
+        b.listened = time.time()
+        if b.live:
+            self._greet(new, b)
+        else:
+            b.greet = True
+        return True
+
+    def _greet(self, sender, st):
+        st.greet = False
+        if time.time() < st.cooldown.get("greet", 0):
+            return
+        st.cooldown["greet"] = time.time() + 120
+        live = st.live or {}
+        sess = SESSION_ES.get(st.session_type)
+        where = live.get("track_name")
+        self._say(sender, "Ya te tengo en pantalla%s." % (
+            ": %s en %s" % (sess, where) if sess and where
+            else ", %s" % where if where else ""), 1)
 
     def audio(self, msg_id):
         """mp3 bytes for one call (synthesised on demand, cached)."""
@@ -403,9 +445,10 @@ class RaceEngineer:
         sess = (live.get("track_id"), session_type)
         if st.session != sess:        # new session: start over, keep the weekend
             self._save_session(st)
-            listened = st.listened
+            listened, qa, greet = st.listened, st.qa[-4:], st.greet
             st.__init__()
             st.listened, st.session = listened, sess
+            st.qa, st.greet = qa, greet
             st.live, st.driver = live, live.get("driver_name")
             st.session_type = session_type
             st.prev = r
@@ -413,6 +456,8 @@ class RaceEngineer:
             tl = r.get("time_left") or 0
             st.time_said = {x for x in TIME_CALLS if tl and tl <= x}
             self._open_weekend(st)
+            if st.greet:
+                self._greet(sender, st)
             return
         p, st.prev = st.prev, r
         if p is None:
@@ -856,7 +901,7 @@ class RaceEngineer:
                 if mine and others else None)
         top = sorted(st.field_best.items(), key=lambda kv: kv[1])[:5]
         rec = {
-            "id": st.started, "type": st.session[1],
+            "id": st.started, "type": st.session[1], "season": r.get("season"),
             "session": SESSION_ES.get(st.session[1]),
             "laps": len(laps),
             "best_lap": laptime_es(mine) if mine else None,
@@ -926,6 +971,26 @@ class RaceEngineer:
             x.pop("type", None)
         return out
 
+    def _latest_weekend(self):
+        """The most recent weekend still going (no telemetry yet, so we
+        don't know the track: assume the driver carries on with it)."""
+        with self._lock:
+            fresh = [w for w in self._weekends.values()
+                     if time.time() - w.get("updated", 0) < WEEKEND_GAP_S]
+            if not fresh:
+                return None
+            wk = max(fresh, key=lambda w: w.get("updated", 0))
+            sessions = [dict(x) for x in wk["sessions"]]
+        for x in sessions[:-1]:
+            x.pop("setup", None)
+        for x in sessions:
+            x.pop("id", None)
+            x.pop("type", None)
+        return {"track": wk.get("track"), "driver": wk.get("driver"),
+                "season": next((x["season"] for x in reversed(sessions)
+                                if x.get("season")), None),
+                "sessions": sessions}
+
     def _maybe_brief(self, sender, st, r, live, now):
         """Once per session, when someone listens: a two-line briefing
         with what the earlier sessions of the weekend taught us."""
@@ -936,7 +1001,7 @@ class RaceEngineer:
             st.briefed = True      # lights are out: not the moment
             return
         st.briefed = True
-        if not brain.llm_ready() or not self._weekend_view(st):
+        if not brain.llm_ready() or not (self._weekend_view(st) or st.qa):
             return
         threading.Thread(target=self._brief, args=(sender, st),
                          daemon=True).start()
@@ -949,8 +1014,9 @@ class RaceEngineer:
                 "Con lo que aprendimos en las sesiones anteriores del fin "
                 "de semana (weekend), dale un briefing de radio: lo más "
                 "importante que sabemos y el objetivo de esta sesión. "
+                "Si antes de salir te contó un plan, tenlo en cuenta. "
                 "Máximo 2 frases." % SESSION_ES.get(st.session_type, ""),
-                [])
+                st.qa)
             if text:
                 self._say(sender, text, 1)
         except brain.BrainError as e:
@@ -959,6 +1025,9 @@ class RaceEngineer:
     # -------------------------------------------------------- brain
 
     def _context(self, st):
+        wk = None if st.live else self._latest_weekend()
+        if wk and not st.driver:
+            st.driver = wk.get("driver")
         live = st.live or {}
         r = dict(live.get("race") or {})
         r.pop("forecast", None)
@@ -983,6 +1052,13 @@ class RaceEngineer:
                         for x in st.laps[-15:]],
             "recent_radio_calls": [m[3] for m in list(self._msgs)[-6:]],
             "weekend": self._weekend_view(st),
+        } if st.live else {
+            "telemetry": "ninguna todavía: el piloto está en los menús del "
+                         "juego o cargando. No sabes en qué sesión ni "
+                         "circuito está salvo lo que te diga; en cuanto "
+                         "entre al garaje o a pista recibirás sus datos.",
+            "last_weekend": wk,
+            "season": (wk or {}).get("season"),
         }
 
     @staticmethod
@@ -1050,8 +1126,8 @@ class RaceEngineer:
             parts = []
             try:
                 # voice each sentence as soon as it's written
-                for chunk in brain.answer_stream(
-                        st.driver, self._context(st), q, st.qa):
+                ctx = self._context(st)
+                for chunk in brain.answer_stream(st.driver, ctx, q, st.qa):
                     if not parts:
                         print("[engineer] tiempos: voz->texto %.1fs, "
                               "primera frase %.1fs" % (t_stt, time.time() - t0))

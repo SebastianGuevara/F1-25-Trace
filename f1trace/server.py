@@ -202,6 +202,13 @@ def make_handler(db_path, recorder, demo=False):
                     return self._json({"ok": True, "name": new_name, "renamed": renamed_count})
                 if path == "/api/radio/ask" and recorder:
                     return self.radio_ask()
+                if path == "/api/radio/link" and recorder:
+                    token = os.environ.get("RADIO_TOKEN", "").strip()
+                    if token and self.headers.get("X-Radio-Token", "") != token:
+                        return self._json({"error": "token"}, 401)
+                    q = self._query()
+                    return self._json({"ok": recorder.engineer.link(
+                        q.get("from", ""), q.get("to", ""))})
                 if path == "/api/radio/check" and recorder:
                     sender = self._query().get("sender", "")
                     ok = recorder.engineer.radio_check(
@@ -403,7 +410,8 @@ def make_handler(db_path, recorder, demo=False):
         def radio_ask(self):
             """Driver's voice clip -> transcription -> Claude answer, which
             goes out through the normal radio queue. Only for a sender
-            that has sent telemetry (garage and menus count), and behind
+            that has sent telemetry (garage and menus count) or a page's own
+            pilot:<id> radio before the car shows up, and behind
             RADIO_TOKEN when set, since every call spends API credit."""
             token = os.environ.get("RADIO_TOKEN", "").strip()
             if token and self.headers.get("X-Radio-Token", "") != token:

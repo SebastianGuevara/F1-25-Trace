@@ -221,6 +221,10 @@ engineer calls out, in Spanish:
   per lap, fuel per lap, setup, what you talked about) is kept in
   `data/weekend.json`, so in quali or the race the engineer remembers
   practice, and gives a short briefing when a new session starts.
+- before the car: the radio works as soon as the page is open, even with
+  the game in its menus. Tell the engineer your plan; when telemetry
+  arrives the page links its radio to your car ("Ya te tengo en
+  pantalla: Q1 en Monza") and the conversation carries over.
 
 **🎙 MIC** opens the microphone hands-free (no button to press): start a
 phrase with the wake word (*radio* or *ingeniero* by default) — "Radio,

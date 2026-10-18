@@ -218,8 +218,22 @@ let follow = new URLSearchParams(location.search).get("driver")
   || store.get("f1trace.raceFollow") || store.get("f1trace.myDriver") || "";
 let sender = "";          // ip:port of the followed driver, resolved from live_all
 // the radio keeps talking to the last sender seen even when telemetry
-// stops (garage, menus); it only changes when another driver is picked
-let radioTarget = "";
+// stops (garage, menus); it only changes when another driver is picked.
+// Before any telemetry it talks on this page's own "pilot:<id>" radio,
+// which is linked to the car (conversation and all) once it shows up.
+let radioId = store.get("f1trace.radioId");
+if (!radioId) { radioId = Math.random().toString(36).slice(2, 12); store.set("f1trace.radioId", radioId); }
+const PILOT = "pilot:" + radioId;
+let radioTarget = PILOT;
+function retarget(next) {
+  if (!next || next === radioTarget) return;
+  const headers = {};
+  const tok = store.get("f1trace.radioToken");
+  if (tok) headers["X-Radio-Token"] = tok;
+  fetch(`/api/radio/link?from=${encodeURIComponent(radioTarget)}&to=${encodeURIComponent(next)}`,
+    { method: "POST", headers }).catch(() => {});
+  radioTarget = next;
+}
 let inFlight = false, lastOk = 0, waitMsg = "";
 const same = (a, b) => (a || "").trim().toLowerCase() === (b || "").trim().toLowerCase();
 
@@ -276,7 +290,7 @@ async function refreshSenders() {
 
   const next = pick ? pick.sender : "";
   if (next !== sender) { sender = next; lastOk = 0; document.body.classList.remove("stale"); }
-  if (next) radioTarget = next;
+  if (next) retarget(next);
 
   const h = $("rv-wait").querySelector("h2"), p = $("rv-wait").querySelector("p");
   if (!follow && all.length > 1) {
@@ -287,12 +301,13 @@ async function refreshSenders() {
     p.textContent = "Not on track right now — this page fills in as soon as they are.";
   } else {
     h.textContent = "Waiting for live telemetry";
-    p.textContent = "Get on track with UDP telemetry on — this page fills in by itself.";
+    p.textContent = "Get on track with UDP telemetry on — this page fills in by itself. "
+      + "Meanwhile the 📻 radio already works: talk to your engineer from the menus.";
   }
 }
 $("rv-sender").addEventListener("change", (e) => {
   follow = e.target.value;
-  radioTarget = "";
+  radioTarget = PILOT;
   store.set("f1trace.raceFollow", follow);
   refreshSenders();
 });
@@ -526,7 +541,9 @@ async function playQueue() {
 }
 async function pollRadio() {
   if (!radioTarget) return;
-  if (radioTarget !== radioSender) { radioSender = radioTarget; radioSince = -1; }
+  // ids are global, so `since` carries over when the radio is relinked
+  // (and the "I've got you" call on the new sender isn't skipped)
+  if (radioTarget !== radioSender) radioSender = radioTarget;
   try {
     const q = `sender=${encodeURIComponent(radioTarget)}&since=${Math.max(radioSince, 0)}`;
     const res = await fetch(`/api/radio?${q}`, { cache: "no-store" }).then((r) => r.json());
