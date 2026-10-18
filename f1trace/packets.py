@@ -23,6 +23,7 @@ PARTICIPANTS = 4
 CAR_SETUPS = 5
 CAR_TELEMETRY = 6
 CAR_STATUS = 7
+CAR_DAMAGE = 10
 TIME_TRIAL = 14
 CAR_TELEMETRY2 = 16
 
@@ -74,13 +75,17 @@ def parse_session(data):
     (weather, track_temp, air_temp, total_laps, track_length,
      session_type, track_id, formula) = _SESSION_LEAD.unpack_from(data, HEADER.size)
     network_game = 0
+    safety_car = 0
     if len(data) >= HEADER.size + 126:
+        safety_car = data[HEADER.size + 124]  # 0 none, 1 SC, 2 VSC, 3 formation
         network_game = data[HEADER.size + 125]
+    time_left = struct.unpack_from("<H", data, HEADER.size + 9)[0]
     return {
         "weather": weather, "track_temp": track_temp, "air_temp": air_temp,
         "total_laps": total_laps, "track_length": track_length,
         "session_type": session_type, "track_id": track_id, "formula": formula,
         "network_game": network_game,
+        "safety_car": safety_car, "time_left": time_left,
     }
 
 
@@ -186,7 +191,9 @@ _LAP_CAR = struct.Struct("<IIHBHBHBHBfffBBBBBBBBBBBBBBBHHBfB")  # 57 B
 
 class CarLap:
     __slots__ = ("last_lap_ms", "current_lap_ms", "s1_ms", "s2_ms",
-                 "lap_distance", "lap_num", "invalid")
+                 "lap_distance", "lap_num", "invalid", "position",
+                 "gap_front_ms", "gap_leader_ms", "pit_status", "pit_stops",
+                 "sector", "penalties_s", "warnings", "grid", "result_status")
 
     def __init__(self, v):
         self.last_lap_ms = v[0]
@@ -196,6 +203,17 @@ class CarLap:
         self.lap_distance = v[10]
         self.lap_num = v[14]
         self.invalid = v[18]
+        # race-view fields
+        self.gap_front_ms = v[7] * 60000 + v[6]
+        self.gap_leader_ms = v[9] * 60000 + v[8]
+        self.position = v[13]
+        self.pit_status = v[15]      # 0 none, 1 pitting, 2 in pit area
+        self.pit_stops = v[16]
+        self.sector = v[17]
+        self.penalties_s = v[19]
+        self.warnings = v[20]
+        self.grid = v[24]
+        self.result_status = v[26]   # 2 active, 3 finished
 
 
 def parse_lap_data(data, fmt):
@@ -231,8 +249,13 @@ def parse_car_telemetry(data, fmt, wanted):
         out[idx] = {
             "speed": v[0], "throttle": v[1], "steer": v[2], "brake": v[3],
             "gear": v[5], "rpm": v[6], "drs": v[7],
-            # surface temps are v[14:18] (brakes are v[10:14])
+            # surface temps are v[14:18] (brakes are v[10:14]);
+            # every corner array is RL, RR, FL, FR on the wire
             "tyre_temp": v[14:18],
+            "brake_temp": v[10:14],
+            "tyre_inner": v[18:22],
+            "engine_temp": v[22],
+            "tyre_press": v[23:27],
         }
     return out
 
@@ -255,7 +278,45 @@ def parse_car_status(data, fmt, wanted):
             "tc": v[0], "abs": v[1],
             "fuel": v[5], "tyre_actual": v[13], "tyre_visual": v[14],
             "ers_store": v[19], "ers_mode": v[20],
+            "fuel_mix": v[2], "brake_bias": v[3], "pit_limiter": v[4],
+            "fuel_capacity": v[6], "fuel_laps": v[7],   # MFD surplus, laps
+            "tyre_age": v[15], "fia_flag": v[16],
         }
+    return out
+
+
+# ---------------------------------------------------------------- damage
+
+# F1 25 CarDamageData, 46 B: tyre wear (4 float), tyre / brake damage and
+# blisters (4 B each), then single-byte panel and power-unit wear fields.
+# The record size is derived from the packet length so a format that
+# appends fields per car still reads this prefix.
+_DAMAGE_CAR = struct.Struct("<ffff" + "B" * 30)
+_DAMAGE_PARTS = (
+    "wing_fl", "wing_fr", "wing_rear", "floor", "diffuser", "sidepod",
+    "drs_fault", "ers_fault", "gearbox", "engine",
+    "mguh", "es", "ce", "ice", "mguk", "tc", "blown", "seized")
+
+
+def parse_car_damage(data, fmt, wanted):
+    n = num_cars(fmt)
+    body = len(data) - HEADER.size
+    size = body // n if body > 0 else 0
+    if size < _DAMAGE_CAR.size:
+        return {}
+    out = {}
+    for idx in wanted:
+        off = HEADER.size + idx * size
+        if off + _DAMAGE_CAR.size > len(data):
+            continue
+        v = _DAMAGE_CAR.unpack_from(data, off)
+        if not all(0.0 <= w <= 100.0 for w in v[0:4]):
+            continue   # layout mismatch guard
+        d = {"tyre_wear": [round(w, 1) for w in v[0:4]],
+             "tyre_damage": list(v[4:8]), "brake_damage": list(v[8:12]),
+             "blisters": list(v[12:16])}
+        d.update(zip(_DAMAGE_PARTS, v[16:]))
+        out[idx] = d
     return out
 
 

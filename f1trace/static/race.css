@@ -1,0 +1,216 @@
+/* RACE page: live race-engineer dashboard. Shares the tokens, header and
+   card look of style.css; laid out as one row of panels on very wide
+   screens (Xeneon Edge 2560×720) and as a wrapping grid elsewhere. */
+
+body.race-page { background: var(--bg); }
+.race-page a.chip { text-decoration: none; }
+.rv-who { font-size: 12px; color: var(--dim); font-weight: 600; }
+.rv-who b { color: var(--text); }
+#rv-sender {
+  background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+  border-radius: 6px; font-family: inherit; font-size: 12px; padding: 3px 8px;
+}
+
+/* safety car / VSC / pit banner */
+.rv-flag {
+  text-align: center; font-weight: 800; font-style: italic;
+  letter-spacing: 4px; font-size: 15px; padding: 3px 0;
+}
+.rv-flag.sc { background: #facc15; color: #1a1400; }
+.rv-flag.pit { background: #1d4ed8; color: #fff; }
+
+#rv-grid {
+  flex: 1; min-height: 0; display: grid; gap: 12px; padding: 16px 14px 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-areas: "standing tyres fuel" "damage tyres driver";
+  overflow: auto;
+}
+#rv-standing { grid-area: standing; }
+#rv-tyres { grid-area: tyres; }
+#rv-fuel { grid-area: fuel; }
+#rv-damage { grid-area: damage; }
+#rv-drive { grid-area: driver; }
+/* narrow screens (tablet / phone): one column, scrolls */
+@media (max-width: 1100px) {
+  #rv-grid { grid-template-columns: 1fr; grid-template-rows: none;
+             grid-template-areas: "standing" "tyres" "fuel" "damage" "driver"; }
+  #rv-tyres { min-height: 460px; }
+  #rv-drive { min-height: 260px; }
+}
+/* very wide, short screens: one row, tyres get the most room */
+@media (min-aspect-ratio: 3/1) {
+  #rv-grid {
+    grid-template-columns: 1fr 1.7fr 1fr 1fr 0.9fr;
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-areas: "standing tyres fuel damage driver";
+    overflow: hidden;
+  }
+}
+
+.rv-panel {
+  position: relative; min-width: 0; min-height: 0;
+  padding: 16px 14px 12px;
+  background:
+    repeating-linear-gradient(45deg, rgba(255,255,255,.022) 0 2px, transparent 2px 5px),
+    linear-gradient(168deg, rgba(40,48,64,.7), rgba(10,12,17,.95) 58%);
+  border: 1px solid #2c3444; border-radius: 3px 14px 3px 14px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.rv-panel::before {
+  content: ""; position: absolute; left: 0; top: 0; height: 2px; width: 62%;
+  background: linear-gradient(90deg, var(--f1red), rgba(225,6,0,0));
+}
+.rv-k {
+  font-size: 10px; font-weight: 700; letter-spacing: 1.5px; color: var(--dim);
+}
+.rv-panel b { font-variant-numeric: tabular-nums; }
+.rv-purple { color: #c084fc; }
+.rv-good { color: var(--green); }
+.rv-bad { color: var(--red); }
+
+/* ---------- standing ---------- */
+.rv-pos-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; }
+.rv-pos { display: flex; align-items: baseline; font-style: italic; }
+.rv-pos span { font-size: 28px; font-weight: 700; color: var(--f1red); }
+.rv-pos b { font-size: clamp(44px, 9vh, 76px); line-height: .9; font-weight: 700; }
+.rv-pos small, .rv-lap small { font-size: 14px; color: var(--dim); margin-left: 4px; font-weight: 600; }
+.rv-lap { text-align: right; }
+.rv-lap b { display: block; font-size: 28px; font-weight: 700; font-style: italic; line-height: 1; }
+.rv-gaps, .rv-times, .rv-kv {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px;
+}
+.rv-gap, .rv-times > div, .rv-kv > div {
+  background: rgba(0,0,0,.25); border: 1px solid #222a38; border-radius: 6px;
+  padding: 5px 8px; display: flex; flex-direction: column; min-width: 0;
+}
+.rv-gap b { font-size: 19px; font-style: italic; }
+.rv-times b, .rv-kv b { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rv-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; }
+.rv-tag {
+  font-size: 10px; font-weight: 700; letter-spacing: 1px; padding: 3px 8px;
+  border-radius: 4px; background: #1d2230; color: var(--dim);
+}
+.rv-tag.warn { background: #3a2410; color: var(--yellow); }
+.rv-tag.bad { background: #3b1111; color: var(--red); }
+
+/* ---------- tyres ---------- */
+.rv-tyre-grid {
+  flex: 1; min-height: 0; display: grid; gap: 10px;
+  grid-template-columns: minmax(0, 1fr) minmax(90px, .7fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+}
+.rv-car {
+  grid-column: 2; grid-row: 1 / 3; min-height: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+}
+.rv-tyre-grid .rv-corner[data-i="0"] { grid-column: 1; grid-row: 1; }
+.rv-tyre-grid .rv-corner[data-i="1"] { grid-column: 3; grid-row: 1; }
+.rv-tyre-grid .rv-corner[data-i="2"] { grid-column: 1; grid-row: 2; }
+.rv-tyre-grid .rv-corner[data-i="3"] { grid-column: 3; grid-row: 2; }
+.rv-car-svg { flex: 1; min-height: 0; width: 100%; max-height: 100%; }
+.rv-body { fill: #1f2532; stroke: #3a4354; stroke-width: 1.5; }
+.rv-wing { fill: #2a3242; }
+.rv-halo { fill: none; stroke: #4a5568; stroke-width: 3; }
+.rv-wheel { fill: #2a3242; stroke: #0b0c0f; stroke-width: 1.5; transition: fill .3s; }
+.rv-compound {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 38px; height: 38px; border-radius: 50%; border: 4px solid #94a3b8;
+  font-weight: 900; font-size: 18px; background: #0b0d13;
+}
+.rv-age { font-size: 11px; font-weight: 700; letter-spacing: 1px; color: var(--dim); text-align: center; }
+.rv-age b { color: var(--text); font-size: 15px; }
+
+.rv-corner {
+  min-width: 0; min-height: 0; border-radius: 8px; border: 1px solid #222a38;
+  background: rgba(0,0,0,.28); padding: 6px 9px;
+  display: grid; grid-template-columns: 1fr auto; align-content: space-between; gap: 2px 8px;
+}
+.rv-corner .c-name { font-size: 10px; font-weight: 800; letter-spacing: 1.5px; color: var(--dim); }
+.rv-corner .c-surf {
+  grid-column: 1 / 3; font-size: clamp(24px, 5vh, 40px); font-weight: 700; font-style: italic;
+  line-height: 1; transition: color .3s;
+}
+.rv-corner .c-surf small { font-size: 12px; color: var(--dim); font-style: normal; margin-left: 4px; }
+.rv-corner .c-row { display: contents; font-size: 12px; }
+.rv-corner .c-row span { color: var(--dim); font-size: 10px; font-weight: 700; letter-spacing: 1px; }
+.rv-corner .c-row b { text-align: right; font-size: 13px; }
+.rv-corner .c-wear { grid-column: 1 / 3; height: 6px; border-radius: 3px; background: #1c2331; overflow: hidden; }
+.rv-corner .c-wear i { display: block; height: 100%; width: 0; transition: width .4s, background .4s; }
+
+/* ---------- fuel / energy ---------- */
+.rv-big-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.rv-big { display: flex; align-items: baseline; gap: 6px; }
+.rv-big b { font-size: clamp(30px, 6vh, 46px); font-weight: 700; font-style: italic; line-height: 1; }
+.rv-big span { font-size: 11px; font-weight: 700; letter-spacing: 1.5px; color: var(--dim); }
+.rv-surplus { font-size: 18px; font-weight: 800; font-style: italic; }
+.rv-mode {
+  font-size: 11px; font-weight: 800; letter-spacing: 1.5px; padding: 3px 9px;
+  border-radius: 4px; border: 1px solid currentColor;
+}
+.rv-bar { height: 9px; border-radius: 5px; background: #1c2331; overflow: hidden; }
+.rv-bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .4s; }
+.rv-bar.ers i { background: #f59e0b; }
+.rv-sep { border-top: 1px solid #222a38; margin: 2px 0; }
+
+/* ---------- damage ---------- */
+.rv-dmg-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; flex: 1; min-height: 0; }
+.rv-dmg { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.rv-dmg h4 { font-size: 10px; letter-spacing: 1.5px; color: var(--dim); margin-bottom: 2px; }
+.rv-dmg .d-row { display: grid; grid-template-columns: 1fr auto; gap: 1px 8px; font-size: 11px; }
+.rv-dmg .d-row span { color: #aab2bf; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rv-dmg .d-row b { font-size: 12px; }
+.rv-dmg .d-bar { grid-column: 1 / 3; height: 4px; border-radius: 2px; background: #1c2331; overflow: hidden; }
+.rv-dmg .d-bar i { display: block; height: 100%; transition: width .4s; }
+.rv-faults { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* ---------- driver ---------- */
+.rv-drive { flex: 1; min-height: 0; display: flex; align-items: stretch; gap: 12px; }
+.rv-pedal {
+  width: 26px; flex: none; display: flex; flex-direction: column; align-items: center; gap: 4px;
+}
+.rv-pedal i {
+  flex: 1; width: 100%; border-radius: 5px; background: #1c2331; position: relative; overflow: hidden;
+  display: block;
+}
+.rv-pedal i::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0;
+  height: var(--v, 0%); background: var(--green);
+}
+.rv-pedal.brk i::after { background: var(--red); }
+.rv-pedal span { font-size: 9px; font-weight: 700; letter-spacing: 1px; color: var(--dim); }
+.rv-speedo {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+}
+.rv-gear {
+  font-size: clamp(30px, 7vh, 52px); font-weight: 800; color: var(--yellow);
+  border: 1px solid #2a3242; background: #171d29; border-radius: 10px;
+  min-width: 1.6em; text-align: center; line-height: 1.2;
+}
+.rv-speed { font-size: clamp(38px, 9vh, 64px); font-weight: 700; font-style: italic; line-height: 1; font-variant-numeric: tabular-nums; }
+.rv-rpm { width: 100%; height: 8px; border-radius: 4px; background: #1c2331; overflow: hidden; }
+.rv-rpm i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--green), var(--yellow) 70%, var(--red)); }
+.rv-rpm-txt { font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; }
+
+/* ---------- waiting overlay ---------- */
+.rv-wait {
+  position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  padding: 10px 18px; text-align: center; z-index: 20;
+}
+.rv-wait h2 { font-size: 15px; }
+.rv-wait p { font-size: 12px; color: var(--dim); }
+.rv-wait.hide { display: none; }
+body.stale #rv-grid { opacity: .45; }
+
+/* one-row layout: spread each panel over the full height, bigger numbers */
+@media (min-aspect-ratio: 3/1) {
+  #rv-standing, #rv-fuel { justify-content: space-between; }
+  .rv-gap b { font-size: clamp(19px, 3.6vh, 28px); }
+  .rv-times b, .rv-kv b { font-size: clamp(16px, 3vh, 22px); }
+  .rv-gap, .rv-times > div, .rv-kv > div { padding: 8px 10px; gap: 2px; }
+  .rv-dmg { justify-content: space-between; }
+  .rv-dmg .d-row { font-size: 12px; }
+  .rv-dmg .d-bar { height: 6px; }
+  .rv-tags { margin-top: 0; }
+}

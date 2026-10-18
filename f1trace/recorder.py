@@ -132,12 +132,16 @@ class Recorder(threading.Thread):
         self.tt = None             # TimeTrial packet datasets
         self.ghost_bufs = {}       # car_idx -> [(t_ms, dist), ...]
         self.stored_ghost_times = set()  # (role, lap_time_ms) dedupe
+        self.damage = {}           # car_idx -> CarDamage dict
+        self.session_live = None   # latest Session packet (weather, SC, ...)
+        self.race = {"lap": None, "start_fuel": None, "used": [], "best_ms": 0}
 
     _CTX_ATTRS = (
         "session_uid", "session_row_id", "session_info", "track_length",
         "player_idx", "bufs", "motion", "telem", "car_status", "telem2",
         "setups", "teams", "driver_names", "sess_assists", "pb_idx",
-        "rival_idx", "tt", "ghost_bufs", "stored_ghost_times")
+        "rival_idx", "tt", "ghost_bufs", "stored_ghost_times",
+        "damage", "session_live", "race")
 
     def _switch_sender(self, addr):
         """Each sender (IP:port) has its own session/lap state. Without
@@ -279,6 +283,8 @@ class Recorder(threading.Thread):
             self.telem.update(packets.parse_car_telemetry(data, fmt, self._wanted()))
         elif pid == packets.CAR_STATUS:
             self.car_status.update(packets.parse_car_status(data, fmt, self._wanted()))
+        elif pid == packets.CAR_DAMAGE:
+            self.damage.update(packets.parse_car_damage(data, fmt, self._wanted()))
         elif pid == packets.CAR_TELEMETRY2 and fmt >= 2026:
             self.telem2.update(packets.parse_car_telemetry2(data, self._wanted()))
         elif pid == packets.CAR_SETUPS:
@@ -307,6 +313,7 @@ class Recorder(threading.Thread):
     def _on_session(self, data, h):
         s = packets.parse_session(data)
         self.track_length = s["track_length"]
+        self.session_live = s
         if self.session_info is None:
             self.session_info = s
             cur = self.con.execute(
@@ -465,6 +472,7 @@ class Recorder(threading.Thread):
             "overtake": 1 if t2.get("overtake") else 0,
             "aero": 1 if t2.get("aero_mode") else 0,
             "invalid": bool(buf.invalid),
+            "race": self._race_view(cars, cl, t, st),
             "trail": trail,
             "updated_at": time.time(),
         }
@@ -487,6 +495,75 @@ class Recorder(threading.Thread):
             cars={str(i): {"role": "player", "lap_num": b.lap_num,
                            "samples": len(b.samples)}
                   for i, b in self.bufs.items()})
+
+    def _race_view(self, cars, cl, t, st):
+        """Race-engineer snapshot for the RACE page: tyres, fuel, gaps,
+        damage. Corner arrays come off the wire as RL, RR, FL, FR and are
+        reordered to FL, FR, RL, RR."""
+        r = self.race
+        fuel = st.get("fuel")
+        if r["lap"] != cl.lap_num:
+            if r["lap"] is not None and cl.lap_num == r["lap"] + 1:
+                if r["start_fuel"] is not None and fuel is not None:
+                    used = r["start_fuel"] - fuel
+                    if 0 < used < 10:   # skip refuels / restarts
+                        r["used"] = (r["used"] + [round(used, 3)])[-5:]
+                if cl.last_lap_ms and (not r["best_ms"] or cl.last_lap_ms < r["best_ms"]):
+                    r["best_ms"] = cl.last_lap_ms
+            r["lap"], r["start_fuel"] = cl.lap_num, fuel
+
+        def corners(v):
+            return [v[2], v[3], v[0], v[1]] if v and len(v) == 4 else None
+
+        behind = next((c for c in cars.values()
+                       if c.position == cl.position + 1
+                       and c.result_status >= 2), None)
+        n_cars = sum(1 for c in cars.values()
+                     if c.position and c.result_status >= 2)
+        per_lap = (sum(r["used"]) / len(r["used"])) if r["used"] else None
+        dmg = self.damage.get(self.player_idx)
+        sl = self.session_live or {}
+        return {
+            "position": cl.position, "num_cars": n_cars, "grid": cl.grid,
+            "lap_num": cl.lap_num, "total_laps": sl.get("total_laps"),
+            "last_lap_ms": cl.last_lap_ms, "best_lap_ms": r["best_ms"],
+            "gap_front_ms": cl.gap_front_ms if cl.position > 1 else None,
+            "gap_leader_ms": cl.gap_leader_ms if cl.position > 1 else None,
+            "gap_behind_ms": behind.gap_front_ms if behind else None,
+            "pit_status": cl.pit_status, "pit_stops": cl.pit_stops,
+            "penalties_s": cl.penalties_s, "warnings": cl.warnings,
+            "sector": cl.sector,
+            "session_type": ids.session_type_name(sl["session_type"]) if sl else None,
+            "weather": sl.get("weather"), "track_temp": sl.get("track_temp"),
+            "air_temp": sl.get("air_temp"), "safety_car": sl.get("safety_car", 0),
+            "time_left": sl.get("time_left"),
+            "tyres": {
+                "actual": st.get("tyre_actual"), "visual": st.get("tyre_visual"),
+                "age": st.get("tyre_age"),
+                "surface": corners(t.get("tyre_temp")),
+                "inner": corners(t.get("tyre_inner")),
+                "pressure": [round(x, 1) for x in corners(t.get("tyre_press")) or []] or None,
+                "brake": corners(t.get("brake_temp")),
+                "wear": corners(dmg["tyre_wear"]) if dmg else None,
+                "damage": corners(dmg["tyre_damage"]) if dmg else None,
+                "blisters": corners(dmg["blisters"]) if dmg else None,
+            },
+            "fuel": {
+                "kg": round(fuel, 2) if fuel is not None else None,
+                "capacity": st.get("fuel_capacity"),
+                "laps_surplus": round(st["fuel_laps"], 2) if st.get("fuel_laps") is not None else None,
+                "per_lap": round(per_lap, 3) if per_lap else None,
+                "laps_left": round(fuel / per_lap, 1) if per_lap and fuel else None,
+                "mix": st.get("fuel_mix"),
+            },
+            "ers_pct": round((st.get("ers_store") or 0.0) / 4e4, 1),
+            "ers_mode": int(st.get("ers_mode") or 0),
+            "engine_temp": t.get("engine_temp"),
+            "brake_bias": st.get("brake_bias"),
+            "pit_limiter": st.get("pit_limiter"),
+            "damage": {k: v for k, v in dmg.items()
+                       if k not in ("tyre_wear", "tyre_damage", "blisters")} if dmg else None,
+        }
 
     COLUMNS = ("t", "d", "x", "y", "z", "spd", "thr", "brk", "str",
                "gear", "drs", "ot", "rpm", "tfl", "tfr", "trl", "trr",

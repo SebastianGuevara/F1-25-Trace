@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TRACE · Race</title>
+<link rel="stylesheet" href="titillium.css">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="race.css">
+</head>
+<body class="race-page">
+<header>
+  <div class="brand"><b>F1</b><span>TRACE</span></div>
+  <div id="rv-chip" class="chip idle">NO SIGNAL</div>
+  <div id="rv-who" class="rv-who"></div>
+  <div class="spacer"></div>
+  <select id="rv-sender" title="live player to follow" style="display:none"></select>
+  <a class="chip edge-chip" href="index.html" title="back to lap analysis">◂ ANALYSIS</a>
+  <button id="rv-fs" class="chip edge-chip" title="full screen — hides the browser bars (Esc to leave)">⛶ FULL</button>
+</header>
+
+<div id="rv-flag" class="rv-flag" style="display:none"></div>
+
+<main id="rv-grid">
+  <!-- standing: position, laps, gaps -->
+  <section class="rv-panel" id="rv-standing">
+    <div class="card-tag">STANDING</div>
+    <div class="rv-pos-row">
+      <div class="rv-pos"><span>P</span><b id="rv-pos">–</b><small id="rv-of"></small></div>
+      <div class="rv-lap">
+        <span class="rv-k">LAP</span>
+        <b id="rv-lap">–</b>
+        <small id="rv-laps-left"></small>
+      </div>
+    </div>
+    <div class="rv-gaps">
+      <div class="rv-gap"><span class="rv-k">AHEAD</span><b id="rv-gap-front">–</b></div>
+      <div class="rv-gap"><span class="rv-k">BEHIND</span><b id="rv-gap-behind">–</b></div>
+      <div class="rv-gap"><span class="rv-k">LEADER</span><b id="rv-gap-leader">–</b></div>
+    </div>
+    <div class="rv-times">
+      <div><span class="rv-k">CURRENT</span><b id="rv-cur">–</b></div>
+      <div><span class="rv-k">LAST</span><b id="rv-last">–</b></div>
+      <div><span class="rv-k">BEST</span><b id="rv-best" class="rv-purple">–</b></div>
+    </div>
+    <div class="rv-tags" id="rv-tags"></div>
+  </section>
+
+  <!-- tyres: four corners around the car -->
+  <section class="rv-panel" id="rv-tyres">
+    <div class="card-tag">TYRES · BRAKES</div>
+    <div class="rv-tyre-grid">
+      <div class="rv-corner" data-i="0"></div>
+      <div class="rv-car">
+        <div class="rv-compound" id="rv-compound"></div>
+        <svg viewBox="0 0 120 220" class="rv-car-svg">
+          <path class="rv-body" d="M60 8 L68 40 L70 70 L84 92 L84 150 L74 196 L46 196 L36 150 L36 92 L50 70 L52 40 Z"/>
+          <rect class="rv-wing" x="22" y="8" width="76" height="9" rx="2"/>
+          <rect class="rv-wing" x="28" y="200" width="64" height="11" rx="2"/>
+          <rect class="rv-wheel" id="rv-w0" x="12" y="40" width="22" height="40" rx="5"/>
+          <rect class="rv-wheel" id="rv-w1" x="86" y="40" width="22" height="40" rx="5"/>
+          <rect class="rv-wheel" id="rv-w2" x="8" y="148" width="26" height="44" rx="5"/>
+          <rect class="rv-wheel" id="rv-w3" x="86" y="148" width="26" height="44" rx="5"/>
+          <circle cx="60" cy="112" r="9" class="rv-halo"/>
+        </svg>
+        <div class="rv-age" id="rv-age"></div>
+      </div>
+      <div class="rv-corner" data-i="1"></div>
+      <div class="rv-corner" data-i="2"></div>
+      <div class="rv-corner" data-i="3"></div>
+    </div>
+  </section>
+
+  <!-- fuel + energy -->
+  <section class="rv-panel" id="rv-fuel">
+    <div class="card-tag">FUEL · ENERGY</div>
+    <div class="rv-big-row">
+      <div class="rv-big"><b id="rv-fuel-kg">–</b><span>KG</span></div>
+      <div class="rv-surplus" id="rv-surplus" title="the game's own fuel target (MFD): laps of fuel above / below what the race needs">–</div>
+    </div>
+    <div class="rv-bar"><i id="rv-fuel-bar"></i></div>
+    <div class="rv-kv">
+      <div><span class="rv-k">PER LAP</span><b id="rv-per-lap">–</b></div>
+      <div><span class="rv-k">LAPS IN TANK</span><b id="rv-in-tank">–</b></div>
+      <div><span class="rv-k">MIX</span><b id="rv-mix">–</b></div>
+    </div>
+    <div class="rv-sep"></div>
+    <div class="rv-big-row">
+      <div class="rv-big"><b id="rv-ers">–</b><span>% ERS</span></div>
+      <div class="rv-mode" id="rv-ers-mode">–</div>
+    </div>
+    <div class="rv-bar ers"><i id="rv-ers-bar"></i></div>
+    <div class="rv-kv">
+      <div><span class="rv-k">ENGINE</span><b id="rv-engine">–</b></div>
+      <div><span class="rv-k">BRAKE BIAS</span><b id="rv-bias">–</b></div>
+      <div><span class="rv-k">TRACK / AIR</span><b id="rv-temps">–</b></div>
+    </div>
+  </section>
+
+  <!-- damage + power unit wear -->
+  <section class="rv-panel" id="rv-damage">
+    <div class="card-tag">DAMAGE · WEAR</div>
+    <div class="rv-dmg-cols">
+      <div class="rv-dmg" id="rv-dmg-body"></div>
+      <div class="rv-dmg" id="rv-dmg-pu"></div>
+    </div>
+    <div class="rv-faults" id="rv-faults"></div>
+  </section>
+
+  <!-- driver: speed, gear, pedals -->
+  <section class="rv-panel" id="rv-drive">
+    <div class="card-tag">DRIVER</div>
+    <div class="rv-drive">
+      <div class="rv-pedal"><i id="rv-thr"></i><span>THR</span></div>
+      <div class="rv-speedo">
+        <div class="rv-gear" id="rv-gear">N</div>
+        <div class="rv-speed" id="rv-speed">0</div>
+        <div class="rv-k">KM/H</div>
+        <div class="rv-rpm"><i id="rv-rpm"></i></div>
+        <div class="rv-rpm-txt" id="rv-rpm-txt">0 RPM</div>
+      </div>
+      <div class="rv-pedal brk"><i id="rv-brk"></i><span>BRK</span></div>
+    </div>
+  </section>
+</main>
+
+<div id="rv-wait" class="rv-wait">
+  <h2>Waiting for live telemetry</h2>
+  <p>Get on track with UDP telemetry on — this page fills in by itself.</p>
+</div>
+
+<script src="race.js"></script>
+</body>
+</html>

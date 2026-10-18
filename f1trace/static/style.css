@@ -1160,3 +1160,4 @@ html.edge .lap-sub { overflow: hidden; white-space: nowrap; }
 html.edge #stage:has(#hud:not(.closed)) #empty-hint { left: var(--edge-hud-w); }
 html.edge #empty-hint p { font-size: 12px; }
 html.edge #sector-card { padding: 6px 10px; font-size: 11px; }
+#race-link { text-decoration: none; }
