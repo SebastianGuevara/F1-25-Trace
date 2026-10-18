@@ -62,4 +62,24 @@ jobs:
             sudo systemctl enable f1trace
             sudo systemctl restart f1trace
             sudo systemctl status f1trace --no-pager
+
+            # 7. HTTPS: Caddy in front of the viewer (certificate is automatic;
+            #    the browser only allows the microphone over HTTPS)
+            DOMAIN=pitwallsim.site
+            if command -v firewall-cmd >/dev/null; then
+              sudo firewall-cmd --permanent --add-service=http --add-service=https
+              sudo firewall-cmd --reload
+            fi
+            if ! command -v caddy >/dev/null; then
+              sudo dnf install -y oracle-epel-release-el9 || true
+              sudo dnf install -y caddy || {
+                sudo dnf install -y 'dnf-command(copr)' &&
+                sudo dnf copr enable -y @caddy/caddy "epel-9-$(uname -m)" &&
+                sudo dnf install -y caddy; }
+            fi
+            sudo setsebool -P httpd_can_network_connect 1 2>/dev/null || true
+            printf '%s, www.%s {\n    reverse_proxy 127.0.0.1:8020\n}\n' "$DOMAIN" "$DOMAIN" | sudo tee /etc/caddy/Caddyfile >/dev/null
+            sudo systemctl enable caddy
+            sudo systemctl restart caddy
+            sudo systemctl status caddy --no-pager || true
             echo "==> Deployment finished successfully!"
