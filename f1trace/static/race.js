@@ -325,6 +325,103 @@ $("rv-panels").addEventListener("click", (e) => {
   applyPanels();
 });
 
+/* race engineer radio: the server writes the calls (/api/radio), this
+   page speaks them — ElevenLabs mp3 when the server has a key, else the
+   browser's own Spanish voice. Subtitles show either way. */
+let radioOn = store.get("f1trace.radio") === "1";
+let radioSince = -1, radioSender = "", radioBusy = false, subTimer = 0;
+const radioQueue = [];
+let audioCtxUnlocked = false;
+
+function paintRadioBtn() {
+  const b = $("rv-radio");
+  b.classList.toggle("on", radioOn);
+  b.textContent = radioOn ? "📻 RADIO ON" : "📻 RADIO";
+}
+function showSub(m) {
+  $("rv-sub-txt").textContent = m.text;
+  const el = $("rv-sub");
+  el.classList.toggle("p3", m.prio >= 3);
+  el.classList.add("show");
+  clearTimeout(subTimer);
+  subTimer = setTimeout(() => el.classList.remove("show"), 4000 + m.text.length * 60);
+}
+function speakBrowser(text) {
+  return new Promise((done) => {
+    if (!window.speechSynthesis) return done();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "es-ES"; u.rate = 1.1;
+    const v = speechSynthesis.getVoices().find((v) => v.lang.startsWith("es"));
+    if (v) u.voice = v;
+    u.onend = u.onerror = () => done();
+    speechSynthesis.speak(u);
+  });
+}
+async function speak(m, tts) {
+  if (tts === "elevenlabs") {
+    try {
+      const r = await fetch(`/api/radio/audio?id=${m.id}`, { cache: "no-store" });
+      if (r.ok) {
+        const url = URL.createObjectURL(await r.blob());
+        const a = new Audio(url);
+        await new Promise((done) => { a.onended = a.onerror = done; a.play().catch(done); });
+        URL.revokeObjectURL(url);
+        return;
+      }
+    } catch (e) { /* fall back to the browser voice */ }
+  }
+  await speakBrowser(m.text);
+}
+async function playQueue() {
+  if (radioBusy) return;
+  radioBusy = true;
+  while (radioQueue.length) {
+    const { m, tts } = radioQueue.shift();
+    // stale low-priority calls aren't worth hearing late
+    if (Date.now() / 1000 - m.t > (m.prio >= 2 ? 25 : 12)) continue;
+    showSub(m);
+    if (radioOn) {
+      $("rv-radio").classList.add("talking");
+      await speak(m, tts);
+      $("rv-radio").classList.remove("talking");
+      await new Promise((r) => setTimeout(r, 350));
+    }
+  }
+  radioBusy = false;
+}
+async function pollRadio() {
+  if (!sender) return;
+  if (sender !== radioSender) { radioSender = sender; radioSince = -1; }
+  try {
+    const q = `sender=${encodeURIComponent(sender)}&since=${Math.max(radioSince, 0)}`;
+    const res = await fetch(`/api/radio?${q}`, { cache: "no-store" }).then((r) => r.json());
+    if (radioSince < 0) { radioSince = res.last_id; return; }   // skip old calls
+    for (const m of res.messages) {
+      radioSince = Math.max(radioSince, m.id);
+      radioQueue.push({ m, tts: res.tts });
+    }
+    if (radioQueue.length) playQueue();
+  } catch (e) { /* server restarting */ }
+}
+$("rv-radio").addEventListener("click", () => {
+  radioOn = !radioOn;
+  store.set("f1trace.radio", radioOn ? "1" : "0");
+  paintRadioBtn();
+  if (radioOn) {
+    // this click is the user gesture browsers need before audio can play
+    if (!audioCtxUnlocked && window.speechSynthesis) {
+      speechSynthesis.speak(new SpeechSynthesisUtterance(""));
+      audioCtxUnlocked = true;
+    }
+    if (sender) fetch(`/api/radio/check?sender=${encodeURIComponent(sender)}`, { method: "POST" });
+  } else {
+    radioQueue.length = 0;
+    window.speechSynthesis?.cancel();
+  }
+});
+paintRadioBtn();
+setInterval(pollRadio, 700);
+
 applyPanels();
 buildCorners();
 paintDamage(null);

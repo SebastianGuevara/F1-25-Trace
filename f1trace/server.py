@@ -80,6 +80,11 @@ def make_handler(db_path, recorder, demo=False):
             self.end_headers()
             self.wfile.write(raw)
 
+        def _query(self):
+            from urllib.parse import parse_qs, urlparse
+            return {k: v[0] for k, v in
+                    parse_qs(urlparse(self.path).query).items()}
+
         def _json(self, obj, code=200):
             self._send(code, json.dumps(obj, separators=(",", ":")),
                        "application/json")
@@ -95,6 +100,8 @@ def make_handler(db_path, recorder, demo=False):
                     st["version"] = __version__
                     if demo:
                         st["demo"] = True
+                    if recorder:
+                        st["radio"] = recorder.engineer.info()
                     return self._json(st)
                 if path == "/api/live_all":
                     return self._json(recorder.get_live_all() if recorder else [])
@@ -105,6 +112,15 @@ def make_handler(db_path, recorder, demo=False):
                         return self._json(recorder.get_live(
                             (q.get("sender") or [None])[0]))
                     return self._json({"active": False})
+                if path == "/api/radio" and recorder:
+                    q = self._query()
+                    return self._json(recorder.engineer.messages(
+                        q.get("sender", ""), int(q.get("since") or 0)))
+                if path == "/api/radio/audio" and recorder:
+                    audio = recorder.engineer.audio(int(self._query().get("id") or 0))
+                    if not audio:
+                        return self._json({"error": "no audio"}, 404)
+                    return self._send(200, audio, "audio/mpeg")
                 if path == "/api/tracks":
                     return self.tracks()
                 m = re.fullmatch(r"/api/tracks/(-?\d+)/laps", path)
@@ -182,6 +198,11 @@ def make_handler(db_path, recorder, demo=False):
                             renamed_count += c.rowcount
                     con.commit()
                     return self._json({"ok": True, "name": new_name, "renamed": renamed_count})
+                if path == "/api/radio/check" and recorder:
+                    sender = self._query().get("sender", "")
+                    ok = recorder.engineer.radio_check(
+                        sender, recorder.get_live(sender))
+                    return self._json({"ok": ok})
                 if path == "/api/rename_driver":
                     n = int(self.headers.get("Content-Length") or 0)
                     body = json.loads(self.rfile.read(n).decode("utf-8")) if n else {}

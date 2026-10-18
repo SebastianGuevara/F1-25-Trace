@@ -240,3 +240,19 @@ body.stale #rv-grid { opacity: .45; }
   .rv-dmg .d-bar { height: 6px; }
   .rv-tags { margin-top: 0; }
 }
+
+/* race engineer radio: header switch + subtitle of the last call */
+#rv-radio.on { background: #16a34a; border-color: #16a34a; color: #fff; }
+#rv-radio.talking { animation: rv-talk .6s ease-in-out infinite alternate; }
+@keyframes rv-talk { to { box-shadow: 0 0 0 4px rgba(22,163,74,.45); } }
+.rv-sub {
+  position: fixed; left: 50%; bottom: 14px; transform: translate(-50%, 20px);
+  max-width: min(900px, calc(100vw - 32px)); z-index: 20;
+  display: flex; gap: 10px; align-items: center;
+  padding: 8px 16px; border-radius: 10px;
+  background: rgba(10, 14, 20, .92); border: 1px solid #16a34a;
+  font-size: 18px; font-weight: 700; color: #f1f5f9;
+  opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s;
+}
+.rv-sub.show { opacity: 1; transform: translate(-50%, 0); }
+.rv-sub.p3 { border-color: #f87171; }

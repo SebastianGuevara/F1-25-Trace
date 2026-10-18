@@ -20,6 +20,7 @@ import threading
 import time
 
 from . import db, ids, packets
+from . import engineer as engineer_mod
 
 
 def _now():
@@ -57,6 +58,7 @@ class Recorder(threading.Thread):
         self._status_lock = threading.Lock()
         self.live_telemetry = {"active": False}
         self.live_players = {}   # sender "ip:port" -> latest live telemetry
+        self.engineer = engineer_mod.RaceEngineer()
         self._reset_session_state(None)
 
     def _load_drivers(self):
@@ -480,6 +482,11 @@ class Recorder(threading.Thread):
         self.live_telemetry["sender"] = sender
         with self._status_lock:
             self.live_players[sender] = self.live_telemetry
+        if self.session_live:
+            self.engineer.observe(
+                sender, self.live_telemetry,
+                self.session_live.get("session_type"),
+                self._neighbour_names(cars, cl))
 
         self._set_status(
             live={
@@ -495,6 +502,17 @@ class Recorder(threading.Thread):
             cars={str(i): {"role": "player", "lap_num": b.lap_num,
                            "samples": len(b.samples)}
                   for i, b in self.bufs.items()})
+
+    def _neighbour_names(self, cars, cl):
+        """Names of the cars just ahead / behind, when they look real."""
+        out = {}
+        for key, pos in (("ahead", cl.position - 1), ("behind", cl.position + 1)):
+            i = next((i for i, c in cars.items() if c.position == pos
+                      and c.result_status >= 2), None)
+            n = self.driver_names.get(i) if i is not None else None
+            if n and not str(n).isdigit() and str(n).lower() != "player":
+                out[key] = str(n).title() if str(n).isupper() else str(n)
+        return out
 
     def _race_view(self, cars, cl, t, st):
         """Race-engineer snapshot for the RACE page: tyres, fuel, gaps,

@@ -203,6 +203,26 @@ outlines** for every 2026-calendar track including Madrid
 [f1-circuits](https://github.com/bacinger/f1-circuits) dataset via
 `tools/build_tracks.py`; such maps are labelled "approx.").
 
+## Race engineer radio
+
+The RACE page (`race.html`) has a **📻 RADIO** switch. With it on, an
+engineer calls out, in Spanish: safety car / VSC, penalties and track-limit
+warnings, rain, positions won or lost, DRS range ahead / behind, fuel
+target, tyre temperatures and wear, damage, and a short summary every few
+laps. Subtitles show on screen either way.
+
+The voice uses ElevenLabs when the server has a key, otherwise the
+browser's own speech. Put the key in a `.env` file at the repo root (never
+committed):
+
+```
+ELEVENLABS_API_KEY=...
+ELEVENLABS_VOICE_ID=...        # optional, any voice from your library
+ELEVENLABS_MODEL=eleven_flash_v2_5   # optional
+```
+
+Restart TRACE after editing `.env`.
+
 ## Layout
 
 ```

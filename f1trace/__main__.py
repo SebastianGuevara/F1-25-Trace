@@ -8,6 +8,7 @@ import tempfile
 import webbrowser
 
 from . import __version__
+from . import engineer
 from . import recorder as recorder_mod
 from . import server
 
@@ -46,6 +47,9 @@ def main():
     ap.add_argument("--no-browser", action="store_true",
                     help="don't open the viewer in a browser on startup")
     args = ap.parse_args()
+    # API keys for the race engineer's voice (ELEVENLABS_API_KEY, ...)
+    engineer.load_env(os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), ".env"))
 
     if args.demo:
         # Work on a throwaway copy so the bundled file is never written to
