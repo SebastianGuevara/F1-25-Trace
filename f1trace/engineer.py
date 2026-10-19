@@ -142,6 +142,26 @@ def num_es(x, nd=1):
     return ("%.*f" % (nd, x)).replace(".", ",")
 
 
+# radio voices to choose from: ELEVENLABS_VOICES="Name:id,Name:id,..."
+# (up to 3), else the configured voice plus two stock ElevenLabs voices
+VOICE_DEFAULTS = (("Brian", "nPczCjzI2devNBz1zQrb"),
+                  ("George", "JBFqnCBsd6RMkjVDRZzb"))
+VOICE_PREVIEW = ("Radio check. Así sueno yo, ¿me escuchas bien?",
+                 "Aquí tu ingeniero. Te escucho alto y claro.",
+                 "Copiado. Con esta voz te voy a hablar en pista.")
+
+
+def _voices(main):
+    out = []
+    for i, part in enumerate(os.environ.get("ELEVENLABS_VOICES", "").split(",")):
+        name, _, vid = part.strip().rpartition(":")
+        if vid.strip():
+            out.append((name.strip() or "Voz %d" % (i + 1), vid.strip()))
+    if not out:
+        out = [("Actual", main)] + [v for v in VOICE_DEFAULTS if v[1] != main]
+    return out[:3]
+
+
 class _Cached(Exception):
     """A phrase whose audio we already have: skip the TTS request."""
 
@@ -239,7 +259,10 @@ class RaceEngineer:
         except ValueError:
             self.el_speed = 0.95
         self.last_tts_error = None
-        self._phrase_audio = {}    # filler text -> mp3, synthesised once
+        self.el_voices = _voices(self.el_voice)
+        self._voice = {}           # sender -> index into el_voices
+        self._mid_voice = collections.OrderedDict()   # msg id -> voice id
+        self._phrase_audio = {}    # (voice, filler text) -> mp3, synthesised once
         self._last_filler = None
 
     # -------------------------------------------------------- usage
@@ -342,6 +365,29 @@ class RaceEngineer:
         self._say(sender, " ".join(bits), 2)
         return True
 
+    # -------------------------------------------------------- voices
+
+    def voice_id(self, sender):
+        i = self._voice.get(sender, 0)
+        return self.el_voices[i][1] if i < len(self.el_voices) else self.el_voice
+
+    def voices(self, sender):
+        return {"voices": [n for n, _ in self.el_voices],
+                "selected": self._voice.get(sender, 0)}
+
+    def set_voice(self, sender, idx, preview=False):
+        """The page picked voice `idx` for its radio; with `preview` the
+        engineer says a line in it so the driver can compare."""
+        if not self.knows(sender) or not 0 <= idx < len(self.el_voices):
+            return False
+        self._voice[sender] = idx
+        if preview:
+            with self._lock:
+                st = self._senders.setdefault(sender, _Sender())
+            st.listened = time.time()
+            self._say(sender, random.choice(VOICE_PREVIEW), 2)
+        return True
+
     def link(self, old, new):
         """The page's radio moves from `old` (its pilot:<id> radio, or the
         game's previous ip:port) to `new`: the conversation goes with it,
@@ -355,6 +401,8 @@ class RaceEngineer:
             b.qa = (a.qa + [x for x in b.qa if x not in a.qa])[-8:]
             b.briefed = False      # react to what was said before the car
         b.listened = time.time()
+        if old in self._voice:
+            self._voice[new] = self._voice[old]
         if b.live:
             self._greet(new, b)
         else:
@@ -508,6 +556,9 @@ class RaceEngineer:
             if cont:
                 self._conts.append(mid)
             self._msgs.append((mid, sender, time.time(), text, prio))
+            self._mid_voice[mid] = self.voice_id(sender)
+            while len(self._mid_voice) > 200:
+                self._mid_voice.popitem(last=False)
             st = self._senders.get(sender)
             listening = st is not None and time.time() - st.listened < 10
         print("[engineer] %s: %s" % (sender, text))
@@ -528,13 +579,14 @@ class RaceEngineer:
         if not owner:
             ev.wait(15)
             return self._audio.get(mid)
-        data = self._phrase_audio.get(text)
+        voice = self._mid_voice.get(mid) or self.el_voice
+        data = self._phrase_audio.get((voice, text))
         try:
             if data:
                 raise _Cached
             req = urllib.request.Request(
                 "https://api.elevenlabs.io/v1/text-to-speech/%s"
-                "?output_format=mp3_44100_64" % self.el_voice,
+                "?output_format=mp3_44100_64" % voice,
                 data=json.dumps({
                     "text": text, "model_id": self.el_model,
                     "language_code": "es",
@@ -550,7 +602,7 @@ class RaceEngineer:
             self.last_tts_error = None
             self._add_usage("tts", chars=len(text))
             if text in FILLER_DEEP + FILLER_SLOW:
-                self._phrase_audio[text] = data
+                self._phrase_audio[(voice, text)] = data
         except _Cached:
             pass
         except urllib.error.HTTPError as e:

@@ -233,7 +233,32 @@ function retarget(next) {
   fetch(`/api/radio/link?from=${encodeURIComponent(radioTarget)}&to=${encodeURIComponent(next)}`,
     { method: "POST", headers }).catch(() => {});
   radioTarget = next;
+  sendVoice(false);
 }
+/* engineer voice (ElevenLabs): up to 3 to pick from, remembered here and
+   re-sent whenever the radio target changes or the radio is switched on */
+let voiceIdx = +(store.get("f1trace.voice") || 0);
+function sendVoice(preview) {
+  const headers = {};
+  const tok = store.get("f1trace.radioToken");
+  if (tok) headers["X-Radio-Token"] = tok;
+  fetch(`/api/radio/voice?sender=${encodeURIComponent(radioTarget)}&v=${voiceIdx}&preview=${preview ? 1 : 0}`,
+    { method: "POST", headers }).catch(() => {});
+}
+fetch("/api/radio/voices", { cache: "no-store" }).then((r) => r.json()).then((d) => {
+  const sel = $("rv-voice"), names = d.voices || [];
+  if (names.length < 2) return;
+  if (voiceIdx >= names.length) voiceIdx = 0;
+  sel.innerHTML = names.map((n, i) => `<option value="${i}">🎧 ${esc(n)}</option>`).join("");
+  sel.value = String(voiceIdx);
+  sel.style.display = "";
+  sel.addEventListener("change", () => {
+    voiceIdx = +sel.value;
+    store.set("f1trace.voice", String(voiceIdx));
+    sendVoice(radioOn);      // with the radio on, hear it straight away
+  });
+  sendVoice(false);
+}).catch(() => {});
 let inFlight = false, lastOk = 0, waitMsg = "";
 const same = (a, b) => (a || "").trim().toLowerCase() === (b || "").trim().toLowerCase();
 
@@ -592,6 +617,7 @@ $("rv-radio").addEventListener("click", () => {
       speechSynthesis.speak(new SpeechSynthesisUtterance(""));
       audioCtxUnlocked = true;
     }
+    sendVoice(false);
     if (radioTarget) fetch(`/api/radio/check?sender=${encodeURIComponent(radioTarget)}`, { method: "POST" });
   } else {
     radioQueue.length = 0;

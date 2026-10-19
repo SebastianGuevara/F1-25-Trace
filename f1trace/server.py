@@ -116,6 +116,9 @@ def make_handler(db_path, recorder, demo=False):
                     q = self._query()
                     return self._json(recorder.engineer.messages(
                         q.get("sender", ""), int(q.get("since") or 0)))
+                if path == "/api/radio/voices" and recorder:
+                    return self._json(recorder.engineer.voices(
+                        self._query().get("sender", "")))
                 if path == "/api/usage" and recorder:
                     return self._json(recorder.engineer.usage())
                 if path == "/api/radio/audio" and recorder:
@@ -209,6 +212,17 @@ def make_handler(db_path, recorder, demo=False):
                     q = self._query()
                     return self._json({"ok": recorder.engineer.link(
                         q.get("from", ""), q.get("to", ""))})
+                if path == "/api/radio/voice" and recorder:
+                    token = os.environ.get("RADIO_TOKEN", "").strip()
+                    if token and self.headers.get("X-Radio-Token", "") != token:
+                        return self._json({"error": "token"}, 401)
+                    q = self._query()
+                    try:
+                        idx = int(q.get("v") or 0)
+                    except ValueError:
+                        return self._json({"error": "v"}, 400)
+                    return self._json({"ok": recorder.engineer.set_voice(
+                        q.get("sender", ""), idx, q.get("preview") == "1")})
                 if path == "/api/radio/check" and recorder:
                     sender = self._query().get("sender", "")
                     ok = recorder.engineer.radio_check(

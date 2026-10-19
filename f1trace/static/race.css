@@ -6,7 +6,7 @@ body.race-page { background: var(--bg); }
 .race-page a.chip { text-decoration: none; }
 .rv-who { font-size: 12px; color: var(--dim); font-weight: 600; }
 .rv-who b { color: var(--text); }
-#rv-sender {
+#rv-sender, #rv-voice {
   background: var(--panel2); color: var(--text); border: 1px solid var(--line);
   border-radius: 6px; font-family: inherit; font-size: 12px; padding: 3px 8px;
 }

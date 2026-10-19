@@ -254,6 +254,9 @@ TRACE after editing it:
 ```
 ELEVENLABS_API_KEY=...         # voice (else the browser speaks)
 ELEVENLABS_VOICE_ID=...        # optional
+ELEVENLABS_VOICES=Name:id,Name:id,Name:id   # optional: up to 3 voices to pick
+                               # from on the RACE page (🎧); default is the
+                               # voice above plus Brian and George
 OPENAI_API_KEY=...             # speech-to-text for the mic
 ANTHROPIC_API_KEY=...          # answers and strategy
 RADIO_TOKEN=...                # optional: the page asks for it once;
