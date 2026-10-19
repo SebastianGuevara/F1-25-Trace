@@ -96,6 +96,10 @@ rápida). push_lap_battery_use_pct: cuánta batería le gasta una vuelta \
 rápida; compárala con ers_pct para decirle si puede abrir otra vuelta. \
 Para abrir una vuelta mira batería, gomas en ventana, tiempo de sesión \
 (tiene que cruzar la línea antes de cero) y gasolina.
+- En el garaje la gasolina no importa (el equipo la carga antes de \
+salir): no la menciones. En pista, fuel_per_lap_kg y fuel.kg dicen si \
+le da para otra vuelta rápida; si no le da, lo primero es mandarlo a \
+boxes.
 - this_session: las vueltas de ESTA sesión con sectores, mejor vuelta, \
 mejores sectores y vuelta ideal. Si pregunta por "mi vuelta", "mis \
 sectores" o "la sesión", contesta con esto y last_lap_analysis, no con \
