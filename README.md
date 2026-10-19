@@ -216,7 +216,12 @@ engineer calls out, in Spanish:
   pit window (with the rejoin position), a summary every 2 laps with the
   gap trend, and a short Claude strategy read every 8 laps;
 - practice / qualifying: lap time vs your best, sector deltas, invalid
-  laps, tyres up to temperature after the out lap, time left;
+  laps, time left; an out-lap coach (tyres per axle and side, brakes,
+  battery, how to warm them) at three points of the lap; after each lap
+  the corner where you lost the most vs your best lap of the weekend and
+  why (braking earlier, slower apex, later on the throttle). The full
+  corner-by-corner comparison goes to Claude, and analysis questions
+  ("¿dónde pierdo tiempo?") use the strategy model;
 - across the weekend: each session (best lap and rank, stints with wear
   per lap, fuel per lap, setup, what you talked about) is kept in
   `data/weekend.json`, so in quali or the race the engineer remembers

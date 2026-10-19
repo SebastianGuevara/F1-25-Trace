@@ -20,7 +20,7 @@ import time
 import urllib.error
 import urllib.request
 
-from . import brain
+from . import brain, lapcoach
 
 RACE_SESSIONS = {15, 16, 17}
 # tyre surface working window (°C) by visual compound family
@@ -148,6 +148,8 @@ class _Sender:
         self.started = time.time()
         self.briefed = False      # weekend briefing given this session
         self.greet = False        # say "I've got you" on the first telemetry
+        self.coach_cp = set()     # out-lap coaching checkpoints already said
+        self.last_analysis = None  # last lap vs the reference, corner by corner
 
 
 class RaceEngineer:
@@ -169,6 +171,7 @@ class RaceEngineer:
         self.weekend_path = (os.path.join(os.path.dirname(usage_path),
                                           "weekend.json") if usage_path else None)
         self._weekends = {}        # "driver|track_id" -> weekend memory
+        self._refs = {}            # weekend key -> best valid lap (columns)
         if self.weekend_path:
             try:
                 with open(self.weekend_path, encoding="utf-8") as f:
@@ -323,6 +326,48 @@ class RaceEngineer:
         self._say(sender, "Ya te tengo en pantalla%s." % (
             ": %s en %s" % (sess, where) if sess and where
             else ", %s" % where if where else ""), 1)
+
+    def lap_done(self, sender, cols, lap_ms, valid, sectors, track_id, length):
+        """A recorded lap (all samples) from the recorder: compare it corner
+        by corner with the weekend's best lap, tell the driver where the
+        time went (practice / qualifying) and keep it for questions."""
+        with self._lock:
+            st = self._senders.get(sender)
+        if not st or not st.session:
+            return
+        key = self._weekend_key(st) or sender
+        ref = self._refs.get(key)
+        lap = {k: cols[k] for k in ("t", "d", "spd", "thr", "brk", "gear")}
+        try:
+            if ref:
+                zones = lapcoach.compare(lap, ref["cols"], track_id, length)
+                an = lapcoach.summary(zones, lap_ms, ref["ms"], sectors,
+                                      ref["sectors"])
+                if an:
+                    an.update({"lap": laptime_es(lap_ms), "valid": valid,
+                               "reference": "%s (%s)" % (
+                                   laptime_es(ref["ms"]), ref["session"])})
+                    st.last_analysis = an
+                    self._lap_call(sender, st, an, lap_ms, ref["ms"])
+        except Exception as e:
+            print("[engineer] lap analysis: %r" % e)
+        if valid and not st.pit_lap and (not ref or lap_ms < ref["ms"]):
+            self._refs[key] = {"ms": lap_ms, "cols": lap, "sectors": sectors,
+                               "session": SESSION_ES.get(st.session_type, "")}
+
+    def _lap_call(self, sender, st, an, lap_ms, ref_ms):
+        if st.session_type in RACE_SESSIONS or not an.get("valid") \
+                or time.time() - st.listened > 10:
+            return
+        lost, won = an["corners_lost"], an["corners_gained"]
+        if lap_ms < ref_ms:
+            if won and won[0]["delta_ms"] <= -80:
+                self._say(sender, "Donde más ganas es en la curva %d, %s." % (
+                    won[0]["corner"], gap_es(-won[0]["delta_ms"])), 0)
+        elif lost and lost[0]["delta_ms"] >= 80 and lap_ms < ref_ms * 1.03:
+            z = lost[0]
+            self._say(sender, "Curva %d, ahí pierdes %s: %s." % (
+                z["corner"], gap_es(z["delta_ms"]), z["cause"]), 1)
 
     def audio(self, msg_id):
         """mp3 bytes for one call (synthesised on demand, cached)."""
@@ -829,16 +874,70 @@ class RaceEngineer:
                     say("Quedan %d minutos de sesión." % (x // 60), 1)
                 break
 
+        self._outlap_coach(say, st, r, on_track, speed)
+
+    OUTLAP_CP = (0.3, 0.65, 0.9)
+
+    def _outlap_coach(self, say, st, r, on_track, speed):
+        """Out lap from the pits: tyres per axle, brakes and battery at
+        three points of the lap, with what to do about them."""
+        if not on_track:
+            st.coach_cp = set()
+            return
+        L, d = r.get("track_length") or 0, r.get("lap_distance")
+        if not st.pit_lap or not L or d is None or speed < 60:
+            return
+        frac = (L + d) / L if d < 0 else d / L
+        cp = next((i for i, x in enumerate(self.OUTLAP_CP)
+                   if frac >= x and i not in st.coach_cp), None)
+        if cp is None:
+            return
+        st.coach_cp.update(range(cp + 1))
         ty = r.get("tyres") or {}
         surf = ty.get("surface")
-        if surf and on_track:
-            lo = WINDOW[VISUAL_KIND.get(ty.get("visual"), "slick")][0]
-            cold = min(surf) < lo - 8
-            if self._held(st, "out_cold", cold, 10, now):
-                st.was_cold = True
-            if st.was_cold and min(surf) >= lo - 3 and speed > 120:
-                st.was_cold = False
-                say("Gomas en temperatura, puedes empujar.", 1)
+        if not surf:
+            return
+        lo, hi = WINDOW[VISUAL_KIND.get(ty.get("visual"), "slick")]
+        front, rear = (surf[0] + surf[1]) / 2, (surf[2] + surf[3]) / 2
+        left, right = (surf[0] + surf[2]) / 2, (surf[1] + surf[3]) / 2
+        cold_f, cold_r = front < lo - 5, rear < lo - 5
+        hot = max(front, rear) > hi
+        ers = r.get("ers_pct")
+        brakes = ty.get("brake") or []
+        last = cp == len(self.OUTLAP_CP) - 1
+        bits = []
+        if not (cold_f or cold_r or hot):
+            bits.append("Gomas %s, delante %d y detrás %d." % (
+                "en ventana" if min(front, rear) >= lo else "casi en ventana",
+                front, rear))
+        else:
+            bits.append("Delanteras a %d, traseras a %d." % (front, rear))
+            if cold_f and cold_r:
+                bits.append("Todo frío: frenadas fuertes y tracción fuerte "
+                            "en las curvas lentas.")
+            elif cold_f:
+                bits.append("Calienta delante: frena fuerte y tarde, y "
+                            "zigzag en recta.")
+            elif cold_r:
+                bits.append("Calienta detrás: acelera fuerte saliendo de "
+                            "las lentas.")
+            else:
+                bits.append("Ya van calientes, rueda suave hasta la línea.")
+        if abs(left - right) >= 10 and not last:
+            bits.append("El lado %s va %d grados más frío." % (
+                "izquierdo" if left < right else "derecho", abs(left - right)))
+        if brakes and max(brakes) < 350 and cp >= 1 and not last:
+            bits.append("Frenos fríos, aprieta más en las próximas frenadas.")
+        if ers is not None and cp >= 1:
+            if ers < 80 and not last:
+                bits.append("Batería al %d%%, sigue cargando." % ers)
+            elif last:
+                bits.append("Batería al %d%%." % ers)
+        if last:
+            ready = not (cold_f or cold_r)
+            bits.append("¡Vuelta rápida, a por ella!" if ready
+                        else "Primer sector con cuidado hasta que agarren.")
+        say(" ".join(bits), 1)
 
     # -------------------------------------------------------- weekend
 
@@ -1052,6 +1151,7 @@ class RaceEngineer:
                         for x in st.laps[-15:]],
             "recent_radio_calls": [m[3] for m in list(self._msgs)[-6:]],
             "weekend": self._weekend_view(st),
+            "last_lap_analysis": st.last_analysis,
         } if st.live else {
             "telemetry": "ninguna todavía: el piloto está en los menús del "
                          "juego o cargando. No sabes en qué sesión ni "
@@ -1127,7 +1227,9 @@ class RaceEngineer:
             try:
                 # voice each sentence as soon as it's written
                 ctx = self._context(st)
-                for chunk in brain.answer_stream(st.driver, ctx, q, st.qa):
+                deep = brain.wants_analysis(q)
+                for chunk in brain.answer_stream(st.driver, ctx, q, st.qa,
+                                                 strategy=deep):
                     if not parts:
                         print("[engineer] tiempos: voz->texto %.1fs, "
                               "primera frase %.1fs" % (t_stt, time.time() - t0))

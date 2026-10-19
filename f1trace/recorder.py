@@ -605,6 +605,8 @@ class Recorder(threading.Thread):
             "forecast": (sl.get("forecast") or [])[:8],
             "pit_window": sl.get("pit_window"),
             "current_lap_ms": cl.current_lap_ms,
+            "lap_distance": round(cl.lap_distance, 1),
+            "track_length": self.track_length,
             "s1_ms": cl.s1_ms, "s2_ms": cl.s2_ms,
             "lap_invalid": bool(cl.invalid),
             "tyres": {
@@ -754,6 +756,14 @@ class Recorder(threading.Thread):
             "role": "player", "lap_num": buf.lap_num,
             "lap_time_ms": lap_time_ms, "valid": not buf.invalid,
         })
+        try:
+            self.engineer.lap_done(
+                self._sender_key(), cols, lap_time_ms, not buf.invalid,
+                [s1, s2, s3] if s1 and s2 else None,
+                self.session_info["track_id"] if self.session_info else None,
+                self.track_length)
+        except Exception as e:      # coaching must never stop recording
+            print("[engineer] lap_done: %r" % e)
 
 
 def _fmt_time(ms):

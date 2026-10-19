@@ -88,6 +88,17 @@ te duró bien", "sales P6 tras la quali". No lo recites entero.
 apunta su plan (sesión, objetivo, estrategia) y usa last_weekend, el \
 último fin de semana en curso, si encaja con lo que te cuenta. No \
 inventes datos del coche.
+- last_lap_analysis: su última vuelta comparada curva a curva con su \
+mejor vuelta del fin de semana (reference). corner = número de curva \
+en orden. delta_ms positivo = pierde tiempo ahí. brake_later_m \
+positivo = frena más tarde, negativo = antes. throttle_later_m \
+positivo = acelera a fondo más tarde. min_speed vs min_speed_ref = \
+velocidad mínima en el vértice. sectors_vs_ref_ms por sector. Si \
+pregunta por su vuelta: di dónde pierde más (curva y décimas) y una o \
+dos correcciones concretas de pilotaje.
+- En prácticas y clasificación sé un coach detallista: preparación de \
+gomas por eje (delante/detrás, izquierda/derecha), frenos, batería, \
+dónde se gana tiempo.
 - Estrategia: razona con desgaste por vuelta, vueltas restantes, \
 ventana, posición al salir y pronóstico; da UNA recomendación clara.
 {regs}"""
@@ -296,6 +307,16 @@ def _open(driver, context, question, history, strategy):
             req.data = json.dumps(data).encode()
             return req.model, urllib.request.urlopen(req, timeout=30)
         raise BrainError("api.anthropic.com HTTP %d: %s" % (e.code, body))
+
+
+_DEEP = re.compile(r"anali|an[aá]lisis|d[oó]nde (pierd|perd|gan)|por ?qu[eé]|"
+                   r"estrateg|compar|mejorar|telemetr|consejo|qu[eé] hago|"
+                   r"c[oó]mo (mejoro|gano|bajo|hago)", re.I)
+
+
+def wants_analysis(question):
+    """Questions that deserve the deeper (strategy) model."""
+    return bool(_DEEP.search(question or ""))
 
 
 def answer_stream(driver, context, question, history, strategy=False):
