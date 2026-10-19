@@ -41,6 +41,11 @@ def _t_at(lap, d):
     return ts[i - 1] + f * (ts[i] - ts[i - 1])
 
 
+def time_at(lap, d):
+    """Lap time (ms) at distance d of a recorded lap, or None."""
+    return _t_at(lap, d) if lap and lap.get("d") else None
+
+
 def _zone(lap, a, b):
     """Braking point, minimum speed and full-throttle point in [a, b]."""
     ds = lap["d"]

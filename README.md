@@ -216,8 +216,10 @@ engineer calls out, in Spanish:
   pit window (with the rejoin position), a summary every 2 laps with the
   gap trend, and a short Claude strategy read every 8 laps;
 - practice / qualifying: lap time vs your best, sector deltas, invalid
-  laps, time left; an out-lap coach (tyres per axle and side, brakes,
-  battery, how to warm them) at three points of the lap; after each lap
+  laps, time left; a coach on out laps and warm-up / cool-down laps
+  (tyres per axle and side, brakes, battery, how to warm them) and, near
+  the line, a go / no-go for the next push lap: battery vs what your
+  push laps use, tyres, session time, fuel; after each lap
   the corner where you lost the most vs your best lap of the session
   (else the weekend's, else your best ever at the track) and
   why (braking earlier, slower apex, later on the throttle). The full

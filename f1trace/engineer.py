@@ -162,6 +162,9 @@ class _Sender:
         self.briefed = False      # weekend briefing given this session
         self.greet = False        # say "I've got you" on the first telemetry
         self.coach_cp = set()     # out-lap coaching checkpoints already said
+        self.coach_lap = None
+        self.lap_kind = None      # out / prep / push (current lap)
+        self.push_ers = []        # % battery each push lap used
         self.last_analysis = None  # last lap vs the reference, corner by corner
         self.session_laps = []    # recorded laps of this session (sectors)
         self.sess_ref = None      # this session's best clean lap (columns)
@@ -357,6 +360,12 @@ class RaceEngineer:
         key = self._weekend_key(st) or sender
         lap = {k: cols[k] for k in ("t", "d", "spd", "thr", "brk", "gear")}
         clean = valid and not st.pit_lap
+        ers = cols.get("ers") or []
+        best = st.sess_ref["ms"] if st.sess_ref else None
+        if ers and not st.pit_lap and (not best or lap_ms < best * 1.03):
+            used = (ers[0] - min(ers)) * 25        # MJ -> % of a 4 MJ store
+            if 15 <= used <= 100:
+                st.push_ers = (st.push_ers + [used])[-5:]
         st.session_laps = (st.session_laps + [{
             "lap": lap_num, "ms": lap_ms, "valid": valid,
             "out_lap": st.pit_lap, "sectors": sectors}])[-30:]
@@ -947,20 +956,48 @@ class RaceEngineer:
             threading.Thread(target=self._debrief, args=(sender, st),
                              daemon=True).start()
 
-    OUTLAP_CP = (0.3, 0.65, 0.9)
+    PREP_CP = (0.3, 0.65, 0.88)
+    PUSH_ERS_DEFAULT = 55     # % of battery a push lap uses, until measured
+
+    def _lap_kind(self, st, r, frac):
+        """'out' (from the pits), 'prep' (warm-up / cool-down between
+        pushes: well off the pace) or 'push'."""
+        if st.pit_lap or r.get("driver_status") == 3:
+            return "out"
+        ref = st.sess_ref or self._refs.get(self._weekend_key(st) or "")
+        cur = r.get("current_lap_ms") or 0
+        if ref and cur and frac > 0.05:
+            ref_t = lapcoach.time_at(ref["cols"], frac * (r.get("track_length") or 0))
+            if ref_t and cur > ref_t * 1.10:
+                return "prep"
+        return "push"
 
     def _outlap_coach(self, say, st, r, on_track, speed):
-        """Out lap from the pits: tyres per axle, brakes and battery at
-        three points of the lap, with what to do about them."""
+        """Out laps and warm-up / cool-down laps: tyres per axle and side,
+        brakes and battery at three points of the lap, and near the line a
+        go / no-go for the next push lap (battery vs what a push lap uses,
+        tyres, session time, fuel). On a push lap: a low-battery warning."""
         if not on_track:
             st.coach_cp = set()
             return
         L, d = r.get("track_length") or 0, r.get("lap_distance")
-        out = st.pit_lap or r.get("driver_status") == 3
-        if not out or not L or d is None or speed < 60:
+        lap = r.get("lap_num") or 0
+        if st.coach_lap != lap:
+            st.coach_lap, st.coach_cp = lap, set()
+        if not L or d is None or speed < 60:
             return
         frac = (L + d) / L if d < 0 else d / L
-        cp = next((i for i, x in enumerate(self.OUTLAP_CP)
+        kind = self._lap_kind(st, r, frac)
+        st.lap_kind = kind
+        ers = r.get("ers_pct")
+        if kind == "push":
+            if ers is not None and ers < 12 and 0.45 < frac < 0.85 \
+                    and "ers_low" not in st.coach_cp:
+                st.coach_cp.add("ers_low")
+                say("Batería al %d%%, administra el despliegue hasta la "
+                    "línea." % ers, 1)
+            return
+        cp = next((i for i, x in enumerate(self.PREP_CP)
                    if frac >= x and i not in st.coach_cp), None)
         if cp is None:
             return
@@ -974,10 +1011,14 @@ class RaceEngineer:
         left, right = (surf[0] + surf[2]) / 2, (surf[1] + surf[3]) / 2
         cold_f, cold_r = front < lo - 5, rear < lo - 5
         hot = max(front, rear) > hi
-        ers = r.get("ers_pct")
         brakes = ty.get("brake") or []
-        last = cp == len(self.OUTLAP_CP) - 1
+        last = cp == len(self.PREP_CP) - 1
+        if last:
+            return say(self._go_call(st, r, frac, front, rear, cold_f, cold_r,
+                                     hot, ers), 2)
         bits = []
+        if cp == 0 and kind == "prep":
+            bits.append("Vuelta de preparación.")
         if not (cold_f or cold_r or hot):
             bits.append("Gomas %s, delante %d y detrás %d." % (
                 "en ventana" if min(front, rear) >= lo else "casi en ventana",
@@ -994,22 +1035,66 @@ class RaceEngineer:
                 bits.append("Calienta detrás: acelera fuerte saliendo de "
                             "las lentas.")
             else:
-                bits.append("Ya van calientes, rueda suave hasta la línea.")
-        if abs(left - right) >= 10 and not last:
+                bits.append("Van calientes, rueda suave para que bajen.")
+        if abs(left - right) >= 10:
             bits.append("El lado %s va %d grados más frío." % (
                 "izquierdo" if left < right else "derecho", abs(left - right)))
-        if brakes and max(brakes) < 350 and cp >= 1 and not last:
+        if brakes and max(brakes) < 350 and cp >= 1:
             bits.append("Frenos fríos, aprieta más en las próximas frenadas.")
-        if ers is not None and cp >= 1:
-            if ers < 80 and not last:
-                bits.append("Batería al %d%%, sigue cargando." % ers)
-            elif last:
-                bits.append("Batería al %d%%." % ers)
-        if last:
-            ready = not (cold_f or cold_r)
-            bits.append("¡Vuelta rápida, a por ella!" if ready
-                        else "Primer sector con cuidado hasta que agarren.")
-        say(" ".join(bits), 1)
+        need = self._push_ers(st)
+        if ers is not None and ers < min(95, need + 25):
+            bits.append("Batería al %d%%, carga: levanta antes de frenar y "
+                        "no despliegues." % ers)
+        # mid-lap, all good: nothing worth a call
+        if cp == 0 or len(bits) > 1 or cold_f or cold_r or hot:
+            say(" ".join(bits), 1)
+
+    def _push_ers(self, st):
+        """% of battery a push lap takes (measured on this session's
+        laps), so we know if there's enough to start one."""
+        use = st.push_ers
+        return round(sum(use[-3:]) / len(use[-3:])) if use else self.PUSH_ERS_DEFAULT
+
+    def _go_call(self, st, r, frac, front, rear, cold_f, cold_r, hot, ers):
+        """Near the line on a prep lap: open a push lap or not, and why."""
+        cur = r.get("current_lap_ms") or 0
+        to_line = cur / frac * (1 - frac) / 1000 if frac > 0.5 and cur else 0
+        tl = r.get("time_left")
+        if tl and tl < to_line:
+            return ("No llegas a la línea antes del final, no hay otra "
+                    "vuelta. Buen trabajo.")
+        need = self._push_ers(st)
+        measured = bool(st.push_ers)
+        why, fix = [], []
+        if ers is not None and ers < need:
+            why.append("batería al %d%% y una rápida %s %d%%" % (
+                ers, "te gasta" if measured else "suele gastar", need))
+            fix.append("carga otra vuelta")
+        if cold_f or cold_r:
+            why.append("%s frías" % ("gomas" if cold_f and cold_r else
+                       "delanteras" if cold_f else "traseras"))
+            fix.append("sigue calentando")
+        wear = max((r.get("tyres") or {}).get("wear") or [0])
+        surplus = (r.get("fuel") or {}).get("laps_surplus")
+        if surplus is not None and surplus < -0.5:
+            why.append("gasolina justa")
+        if why and fix:
+            return "No abras todavía: %s. %s." % (
+                ", ".join(why), " y ".join(fix).capitalize())
+        bits = ["Abre vuelta."]
+        bits.append("Gomas listas, delante %d y detrás %d." % (front, rear)
+                    if not hot else "Gomas algo calientes, cuidado la primera curva.")
+        if ers is not None:
+            bits.append("Batería al %d%%%s." % (
+                ers, ", te sobra" if ers >= need + 20 else ", justa" if ers < need + 8 else ""))
+        if wear >= 12:
+            bits.append("Ojo, gomas ya con %d%% de desgaste." % wear)
+        if why:      # fuel short but nothing to fix now
+            bits.append("Gasolina justa, no la gastes de más.")
+        if tl and tl < to_line + 150:
+            bits.append("Es la última vuelta de la sesión.")
+        bits.append("¡A por ella!")
+        return " ".join(bits)
 
     # -------------------------------------------------------- weekend
 
@@ -1227,6 +1312,10 @@ class RaceEngineer:
                      "drs": live.get("drs")},
             "on_track": age < 3, "telemetry_age_s": int(age),
             "car_state": car_state(r),
+            "lap_kind": {"out": "vuelta de salida", "prep": "vuelta de "
+                         "preparación / enfriamiento", "push": "vuelta rápida"
+                         }.get(st.lap_kind) if st.session_type not in RACE_SESSIONS else None,
+            "push_lap_battery_use_pct": self._push_ers(st) if st.push_ers else None,
             "session": r.get("session_type"), "track": live.get("track_name"),
             "speed_kmh": live.get("speed"), "gear": live.get("gear"),
             "now": r,

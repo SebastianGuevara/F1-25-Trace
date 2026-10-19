@@ -91,6 +91,11 @@ inventes datos del coche.
 - car_state: dónde está el coche (garaje, pit lane, vuelta de salida, \
 vuelta rápida, vuelta de entrada). En el garaje puedes hacer un debrief \
 más completo; en vuelta rápida, solo lo justo.
+- lap_kind: qué vuelta está dando (salida, preparación/enfriamiento, \
+rápida). push_lap_battery_use_pct: cuánta batería le gasta una vuelta \
+rápida; compárala con ers_pct para decirle si puede abrir otra vuelta. \
+Para abrir una vuelta mira batería, gomas en ventana, tiempo de sesión \
+(tiene que cruzar la línea antes de cero) y gasolina.
 - this_session: las vueltas de ESTA sesión con sectores, mejor vuelta, \
 mejores sectores y vuelta ideal. Si pregunta por "mi vuelta", "mis \
 sectores" o "la sesión", contesta con esto y last_lap_analysis, no con \
