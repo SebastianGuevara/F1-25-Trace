@@ -24,7 +24,12 @@ from . import brain, lapcoach
 
 RACE_SESSIONS = {15, 16, 17}
 # tyre surface working window (°C) by visual compound family
-WINDOW = {"slick": (85, 105), "inter": (60, 80), "wet": (50, 70)}
+# F1 25 reports tyre SURFACE temperatures well below real-world windows:
+# on a push lap slicks sit around 66 °C front / 76 °C rear (median of
+# recorded laps). These are the defaults per (front, rear); once the
+# driver has push laps the targets are learned from them.
+TYRE_TARGET = {"slick": (66, 76), "inter": (55, 62), "wet": (48, 54)}
+TYRE_COLD, TYRE_NEAR, TYRE_HOT = 10, 4, 22   # degrees vs target
 VISUAL_KIND = {16: "slick", 17: "slick", 18: "slick",
                7: "inter", 19: "inter", 8: "wet", 20: "wet"}
 COMPOUND_ES = {16: "blando", 17: "medio", 18: "duro", 7: "intermedio",
@@ -167,6 +172,7 @@ class _Sender:
         self.lap_kind = None      # out / prep / push (current lap)
         self.push_ers = []        # % battery each push lap used
         self.fuel_burn = []       # kg each lap on track burned
+        self.tyre_ref = {}        # kind -> [(front, rear) median per push lap]
         self.last_analysis = None  # last lap vs the reference, corner by corner
         self.session_laps = []    # recorded laps of this session (sectors)
         self.sess_ref = None      # this session's best clean lap (columns)
@@ -368,6 +374,14 @@ class RaceEngineer:
             used = (ers[0] - min(ers)) * 25        # MJ -> % of a 4 MJ store
             if 15 <= used <= 100:
                 st.push_ers = (st.push_ers + [used])[-5:]
+        if all(cols.get(k) for k in ("tfl", "tfr", "trl", "trr")) \
+                and not st.pit_lap and (not best or lap_ms < best * 1.03):
+            med = lambda xs: sorted(xs)[len(xs) // 2]
+            kind = VISUAL_KIND.get(((st.live or {}).get("race") or {})
+                                   .get("tyres", {}).get("visual"), "slick")
+            pair = (med([(a + b) / 2 for a, b in zip(cols["tfl"], cols["tfr"])]),
+                    med([(a + b) / 2 for a, b in zip(cols["trl"], cols["trr"])]))
+            st.tyre_ref[kind] = (st.tyre_ref.get(kind, []) + [pair])[-3:]
         fuel = cols.get("fuel") or []
         if fuel and not st.pit_lap and 0.3 < fuel[0] - fuel[-1] < 5:
             st.fuel_burn = (st.fuel_burn + [fuel[0] - fuel[-1]])[-5:]
@@ -1015,11 +1029,12 @@ class RaceEngineer:
         surf = ty.get("surface")
         if not surf:
             return
-        lo, hi = WINDOW[VISUAL_KIND.get(ty.get("visual"), "slick")]
+        tf, tr, _ = self._tyre_target(st, ty)
         front, rear = (surf[0] + surf[1]) / 2, (surf[2] + surf[3]) / 2
         left, right = (surf[0] + surf[2]) / 2, (surf[1] + surf[3]) / 2
-        cold_f, cold_r = front < lo - 5, rear < lo - 5
-        hot = max(front, rear) > hi
+        cold_f, cold_r = front < tf - TYRE_COLD, rear < tr - TYRE_COLD
+        near = front >= tf - TYRE_NEAR and rear >= tr - TYRE_NEAR
+        hot = front > tf + TYRE_HOT or rear > tr + TYRE_HOT
         brakes = ty.get("brake") or []
         last = cp == len(self.PREP_CP) - 1
         fuel = self._fuel_for_push(st, r, frac)
@@ -1040,7 +1055,7 @@ class RaceEngineer:
             bits.append("Vuelta de preparación.")
         if not (cold_f or cold_r or hot):
             bits.append("Gomas %s, delante %d y detrás %d." % (
-                "en ventana" if min(front, rear) >= lo else "casi en ventana",
+                "en temperatura" if near else "casi en temperatura",
                 front, rear))
         else:
             bits.append("Delanteras a %d, traseras a %d." % (front, rear))
@@ -1075,6 +1090,18 @@ class RaceEngineer:
         if cp == 0 or ((len(bits) > 1 or cold_f or cold_r or hot) and changed):
             say(" ".join(bits), 1)
         st.coach_state = (flags, front, rear)
+
+    @staticmethod
+    def _tyre_target(st, ty):
+        """(front, rear) surface target °C for this compound, and whether
+        it was learned from the driver's own push laps."""
+        kind = VISUAL_KIND.get(ty.get("visual"), "slick")
+        got = st.tyre_ref.get(kind)
+        if got:
+            return (round(sum(x[0] for x in got) / len(got)),
+                    round(sum(x[1] for x in got) / len(got)), True)
+        f, r = TYRE_TARGET[kind]
+        return f, r, False
 
     def _push_ers(self, st):
         """% of battery a push lap takes (measured on this session's
@@ -1353,6 +1380,8 @@ class RaceEngineer:
                      "drs": live.get("drs")},
             "on_track": age < 3, "telemetry_age_s": int(age),
             "car_state": car_state(r),
+            "tyre_targets": dict(zip(("front_c", "rear_c", "learned_from_push_laps"),
+                                     self._tyre_target(st, ty))),
             "lap_kind": {"out": "vuelta de salida", "prep": "vuelta de "
                          "preparación / enfriamiento", "push": "vuelta rápida"
                          }.get(st.lap_kind) if st.session_type not in RACE_SESSIONS else None,
@@ -1478,15 +1507,15 @@ class RaceEngineer:
     def _tyre_rules(self, say, st, r, lap, on_track, speed, now):
         ty = r.get("tyres") or {}
         surf = ty.get("surface")
-        kind = VISUAL_KIND.get(ty.get("visual"), "slick")
-        lo, hi = WINDOW[kind]
+        target = self._tyre_target(st, ty)
         if surf and on_track and speed > 120:
-            for axle, ix, name in (("front", (0, 1), "Delanteros"),
-                                   ("rear", (2, 3), "Traseros")):
+            for axle, ix, name, t in (("front", (0, 1), "Delanteros", target[0]),
+                                      ("rear", (2, 3), "Traseros", target[1])):
                 avg = sum(surf[i] for i in ix) / 2
-                cold = (avg < lo - 8 and lap >= 2 and (ty.get("age") or 0) >= 1
+                cold = (avg < t - TYRE_COLD and lap >= 2
+                        and (ty.get("age") or 0) >= 1
                         and st.session_type in RACE_SESSIONS)
-                hot = avg > hi + 5
+                hot = avg > t + TYRE_HOT
                 if self._held(st, axle + "_cold", cold, 8, now) and \
                         now >= st.cooldown.get("cold", 0) and \
                         self._ready(st, axle + "_cold", 120, now):

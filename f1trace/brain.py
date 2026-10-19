@@ -70,8 +70,12 @@ probable. Si no se entiende nada, pide que repita en pocas palabras.
 - on_track=false: está en garaje, boxes o menú; los datos son de su \
 última salida. Ahí puedes alargarte un poco más.
 - now: su coche ahora. tyres: orden delantero izquierdo, delantero \
-derecho, trasero izquierdo, trasero derecho; ventana de superficie \
-slicks 85-105 °C, intermedios 60-80, lluvia 50-70. fuel.laps_surplus: \
+derecho, trasero izquierdo, trasero derecho. En F1 25 la temperatura \
+de SUPERFICIE es mucho más baja que en la F1 real: no uses ventanas \
+reales (85-105). Usa tyre_targets: la temperatura típica de delante y \
+detrás en sus vueltas rápidas (o un valor típico del juego). Más de 10 \
+grados por debajo = frías; unos 20 por encima = sobrecalentando. inner \
+es la carcasa. fuel.laps_surplus: \
 vueltas de gasolina de sobra (negativo = cortos). pit_window: vuelta \
 ideal y última para parar, rejoin = posición al salir. forecast: \
 minutos, tiempo (0 despejado a 5 tormenta) y % de lluvia.
