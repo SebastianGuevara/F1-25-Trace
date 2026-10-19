@@ -560,6 +560,32 @@ class Recorder(threading.Thread):
                 out[key] = str(n).title() if str(n).isupper() else str(n)
         return out
 
+    def _traffic(self, cars, cl):
+        """Cars on a flying lap coming up behind the player (any session):
+        name, metres and estimated seconds back, nearest first."""
+        L = self.track_length or 0
+        if not L:
+            return []
+        me = cl.lap_distance % L
+        out = []
+        for i, c in cars.items():
+            if i == self.player_idx or c.result_status != 2 \
+                    or c.driver_status != 1 or c.pit_status:
+                continue
+            gap = (me - c.lap_distance % L) % L
+            if not 0 < gap < 1500:
+                continue
+            # his average speed so far this lap, else a typical 60 m/s
+            v = c.lap_distance / (c.current_lap_ms / 1000.0) \
+                if c.current_lap_ms > 5000 and c.lap_distance > 300 else 60.0
+            n = self.driver_names.get(i)
+            if n and str(n).isupper():
+                n = str(n).title()
+            out.append({"idx": i, "name": n, "lap": c.lap_num,
+                        "gap_m": int(gap), "gap_s": round(gap / max(v, 30.0), 1)})
+        out.sort(key=lambda x: x["gap_m"])
+        return out[:3]
+
     def _race_view(self, cars, cl, t, st):
         """Race-engineer snapshot for the RACE page: tyres, fuel, gaps,
         damage. Corner arrays come off the wire as RL, RR, FL, FR and are
@@ -608,6 +634,7 @@ class Recorder(threading.Thread):
             "lap_distance": round(cl.lap_distance, 1),
             "driver_status": cl.driver_status,
             "track_length": self.track_length,
+            "traffic": self._traffic(cars, cl),
             "s1_ms": cl.s1_ms, "s2_ms": cl.s2_ms,
             "lap_invalid": bool(cl.invalid),
             "tyres": {

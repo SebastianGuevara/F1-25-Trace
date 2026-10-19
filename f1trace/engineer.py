@@ -186,6 +186,7 @@ class _Sender:
         self.coach_lap = None
         self.coach_state = None   # what the last coaching call said
         self.lap_kind = None      # out / prep / push (current lap)
+        self.traffic_said = {}    # (car idx, his lap) -> 1 heads-up, 2 close
         self.push_ers = []        # % battery each push lap used
         self.fuel_burn = []       # kg each lap on track burned
         self.tyre_ref = {}        # kind -> [(front, rear) median per push lap]
@@ -994,6 +995,7 @@ class RaceEngineer:
                 break
 
         self._outlap_coach(say, st, r, on_track, speed)
+        self._traffic_call(say, st, r, on_track)
 
         # back in the garage after a run: Claude debriefs it
         if r.get("driver_status") == 0 and p.get("driver_status") not in (0, None) \
@@ -1002,6 +1004,32 @@ class RaceEngineer:
                 and self._ready(st, "debrief", 90, now):
             threading.Thread(target=self._debrief, args=(sender, st),
                              daemon=True).start()
+
+    TRAFFIC_WARN_S, TRAFFIC_CLOSE_S = 8.0, 3.0
+
+    def _traffic_call(self, say, st, r, on_track):
+        """Out / prep / in lap: a car on a flying lap coming up behind.
+        A heads-up at ~8 s and a 'let him by' when he's ~3 s back, once
+        per car and lap of his."""
+        slow = st.lap_kind in ("out", "prep") or r.get("driver_status") in (2, 3)
+        if not on_track or not slow:
+            return
+        for c in r.get("traffic") or []:
+            key = (c.get("idx"), c.get("lap"))
+            said, gs = st.traffic_said.get(key, 0), c.get("gap_s") or 99
+            who = c.get("name") or "un coche"
+            if gs <= self.TRAFFIC_CLOSE_S and said < 2:
+                st.traffic_said[key] = 2
+                say("%s%s en vuelta rápida, lo tienes encima. Sal de la "
+                    "trazada y déjalo pasar." % (who[:1].upper(), who[1:]), 3)
+                return
+            if gs <= self.TRAFFIC_WARN_S and said < 1:
+                st.traffic_said[key] = 1
+                say("Ojo, %s viene en vuelta rápida detrás, a %d segundos. "
+                    "No le estorbes." % (who, max(1, round(gs))), 2)
+                return
+        if len(st.traffic_said) > 60:
+            st.traffic_said.clear()
 
     PREP_CP = (0.3, 0.65, 0.88)
     PUSH_ERS_DEFAULT = 55     # % of battery a push lap uses, until measured

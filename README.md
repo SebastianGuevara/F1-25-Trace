@@ -219,7 +219,9 @@ engineer calls out, in Spanish:
   laps, time left; a coach on out laps and warm-up / cool-down laps
   (tyres per axle and side, brakes, battery, how to warm them) and, near
   the line, a go / no-go for the next push lap: battery vs what your
-  push laps use, tyres, session time, fuel; after each lap
+  push laps use, tyres, session time, fuel; on out / prep / in laps,
+  traffic: a heads-up when a car on a flying lap is ~8 s behind and
+  "let him by" at ~3 s; after each lap
   the corner where you lost the most vs your best lap of the session
   (else the weekend's, else your best ever at the track) and
   why (braking earlier, slower apex, later on the throttle). The full
