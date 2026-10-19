@@ -11,9 +11,6 @@ which corners, and whether it's braking or throttle.
 
 *Unofficial fan project — not affiliated with Formula 1 or EA/Codemasters.*
 
-**[Browser demo](https://lmc4s.github.io/F1-25-Trace/)** — the bundled
-demo laps in the full viewer, nothing to install.
-
 ![Two laps compared: speed-colored racing line, green corner badges, telemetry charts and delta trace](docs/img/compare-speed.png)
 *Two laps compared: racing line colored by speed, a badge on every
 corner where the reference gains 0.1 s or more, input traces and the
