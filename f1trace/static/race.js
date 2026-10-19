@@ -558,20 +558,27 @@ async function playQueue() {
   }
   radioBusy = false;
 }
+let radioPolling = false;
 async function pollRadio() {
   if (!radioTarget) return;
+  if (radioPolling) { if (radioQueue.length) playQueue(); return; }
   // ids are global, so `since` carries over when the radio is relinked
   // (and the "I've got you" call on the new sender isn't skipped)
   if (radioTarget !== radioSender) radioSender = radioTarget;
+  // one request at a time: with a slow link, overlapping polls asked with
+  // the same `since` and queued the same call two or three times
+  radioPolling = true;
   try {
     const q = `sender=${encodeURIComponent(radioTarget)}&since=${Math.max(radioSince, 0)}`;
     const res = await fetch(`/api/radio?${q}`, { cache: "no-store" }).then((r) => r.json());
     if (radioSince < 0) { radioSince = res.last_id; return; }   // skip old calls
     for (const m of res.messages) {
-      radioSince = Math.max(radioSince, m.id);
+      if (m.id <= radioSince) continue;      // already queued
+      radioSince = m.id;
       radioQueue.push({ m, tts: res.tts });
     }
   } catch (e) { /* server restarting */ }
+  finally { radioPolling = false; }
   if (radioQueue.length) playQueue();      // also plays calls held back
 }
 $("rv-radio").addEventListener("click", () => {
