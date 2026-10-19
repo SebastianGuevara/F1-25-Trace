@@ -88,8 +88,17 @@ te duró bien", "sales P6 tras la quali". No lo recites entero.
 apunta su plan (sesión, objetivo, estrategia) y usa last_weekend, el \
 último fin de semana en curso, si encaja con lo que te cuenta. No \
 inventes datos del coche.
-- last_lap_analysis: su última vuelta comparada curva a curva con su \
-mejor vuelta del fin de semana (reference). corner = número de curva \
+- car_state: dónde está el coche (garaje, pit lane, vuelta de salida, \
+vuelta rápida, vuelta de entrada). En el garaje puedes hacer un debrief \
+más completo; en vuelta rápida, solo lo justo.
+- this_session: las vueltas de ESTA sesión con sectores, mejor vuelta, \
+mejores sectores y vuelta ideal. Si pregunta por "mi vuelta", "mis \
+sectores" o "la sesión", contesta con esto y last_lap_analysis, no con \
+otras sesiones. weekend es contexto extra: úsalo solo si lo pide o \
+aporta algo claro.
+- last_lap_analysis: su última vuelta comparada curva a curva con una \
+referencia (reference dice cuál: su mejor de esta sesión, del fin de \
+semana o la histórica en el circuito). corner = número de curva \
 en orden. delta_ms positivo = pierde tiempo ahí. brake_later_m \
 positivo = frena más tarde, negativo = antes. throttle_later_m \
 positivo = acelera a fondo más tarde. min_speed vs min_speed_ref = \

@@ -211,7 +211,8 @@ class CarLap:
     __slots__ = ("last_lap_ms", "current_lap_ms", "s1_ms", "s2_ms",
                  "lap_distance", "lap_num", "invalid", "position",
                  "gap_front_ms", "gap_leader_ms", "pit_status", "pit_stops",
-                 "sector", "penalties_s", "warnings", "grid", "result_status")
+                 "sector", "penalties_s", "warnings", "grid", "result_status",
+                 "driver_status")
 
     def __init__(self, v):
         self.last_lap_ms = v[0]
@@ -232,6 +233,8 @@ class CarLap:
         self.warnings = v[20]
         self.grid = v[24]
         self.result_status = v[26]   # 2 active, 3 finished
+        # 0 garage, 1 flying lap, 2 in lap, 3 out lap, 4 on track
+        self.driver_status = v[25]
 
 
 def parse_lap_data(data, fmt):

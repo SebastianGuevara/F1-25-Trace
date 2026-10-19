@@ -218,10 +218,14 @@ engineer calls out, in Spanish:
 - practice / qualifying: lap time vs your best, sector deltas, invalid
   laps, time left; an out-lap coach (tyres per axle and side, brakes,
   battery, how to warm them) at three points of the lap; after each lap
-  the corner where you lost the most vs your best lap of the weekend and
+  the corner where you lost the most vs your best lap of the session
+  (else the weekend's, else your best ever at the track) and
   why (braking earlier, slower apex, later on the throttle). The full
   corner-by-corner comparison goes to Claude, and analysis questions
   ("¿dónde pierdo tiempo?") use the strategy model;
+  the engineer knows where the car is (garage, pit lane, out / flying /
+  in lap), has this session's laps, sectors and ideal lap, and debriefs
+  each run when you're back in the garage;
 - across the weekend: each session (best lap and rank, stints with wear
   per lap, fuel per lap, setup, what you talked about) is kept in
   `data/weekend.json`, so in quali or the race the engineer remembers

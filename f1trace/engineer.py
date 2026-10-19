@@ -56,6 +56,19 @@ WEEKEND_GAP_S = 12 * 3600   # longer pause than this starts a new weekend
 PILOT_RE = re.compile(r"^pilot:[A-Za-z0-9_-]{1,40}$")
 
 
+CAR_STATE_ES = {0: "en el garaje", 1: "vuelta rápida", 2: "vuelta de entrada",
+                3: "vuelta de salida", 4: "en pista"}
+
+
+def car_state(r):
+    """Where the car is, in words: garage, pit lane, out / flying / in lap."""
+    if (r.get("pit_status") or 0) == 1:
+        return "en el pit lane"
+    if (r.get("pit_status") or 0) == 2 and r.get("driver_status") != 0:
+        return "parado en boxes"
+    return CAR_STATE_ES.get(r.get("driver_status"))
+
+
 def _stage(session_type):
     """1 practice, 2 qualifying / shootout, 3 race."""
     return 3 if session_type in RACE_SESSIONS else 2 if session_type >= 5 else 1
@@ -150,6 +163,9 @@ class _Sender:
         self.greet = False        # say "I've got you" on the first telemetry
         self.coach_cp = set()     # out-lap coaching checkpoints already said
         self.last_analysis = None  # last lap vs the reference, corner by corner
+        self.session_laps = []    # recorded laps of this session (sectors)
+        self.sess_ref = None      # this session's best clean lap (columns)
+        self.tried_db = False     # looked up the best-ever lap already
 
 
 class RaceEngineer:
@@ -327,33 +343,80 @@ class RaceEngineer:
             ": %s en %s" % (sess, where) if sess and where
             else ", %s" % where if where else ""), 1)
 
-    def lap_done(self, sender, cols, lap_ms, valid, sectors, track_id, length):
+    def lap_done(self, sender, cols, lap_ms, valid, sectors, track_id, length,
+                 lap_num=None, best_ever=None):
         """A recorded lap (all samples) from the recorder: compare it corner
-        by corner with the weekend's best lap, tell the driver where the
-        time went (practice / qualifying) and keep it for questions."""
+        by corner with a reference — this session's best lap, else the
+        weekend's, else the best ever at this track (`best_ever()` loads
+        it from the database) — tell the driver where the time went
+        (practice / qualifying) and keep it for questions."""
         with self._lock:
             st = self._senders.get(sender)
         if not st or not st.session:
             return
         key = self._weekend_key(st) or sender
-        ref = self._refs.get(key)
         lap = {k: cols[k] for k in ("t", "d", "spd", "thr", "brk", "gear")}
+        clean = valid and not st.pit_lap
+        st.session_laps = (st.session_laps + [{
+            "lap": lap_num, "ms": lap_ms, "valid": valid,
+            "out_lap": st.pit_lap, "sectors": sectors}])[-30:]
+        ref = st.sess_ref or self._refs.get(key)
+        if not ref and best_ever and not st.tried_db:
+            st.tried_db = True
+            try:
+                ref = best_ever()
+                if ref:
+                    ref["cols"] = {k: ref["cols"][k] for k in lap}
+                    self._refs[key] = ref
+            except Exception as e:
+                print("[engineer] best lap: %r" % e)
+                ref = None
         try:
             if ref:
                 zones = lapcoach.compare(lap, ref["cols"], track_id, length)
                 an = lapcoach.summary(zones, lap_ms, ref["ms"], sectors,
                                       ref["sectors"])
                 if an:
-                    an.update({"lap": laptime_es(lap_ms), "valid": valid,
-                               "reference": "%s (%s)" % (
+                    an.update({"lap": laptime_es(lap_ms), "lap_num": lap_num,
+                               "valid": valid,
+                               "reference": "%s, %s" % (
                                    laptime_es(ref["ms"]), ref["session"])})
                     st.last_analysis = an
                     self._lap_call(sender, st, an, lap_ms, ref["ms"])
         except Exception as e:
             print("[engineer] lap analysis: %r" % e)
-        if valid and not st.pit_lap and (not ref or lap_ms < ref["ms"]):
+        if clean and (not st.sess_ref or lap_ms < st.sess_ref["ms"]):
+            st.sess_ref = {"ms": lap_ms, "cols": lap, "sectors": sectors,
+                           "session": "tu mejor de esta sesión (vuelta %s)"
+                           % (lap_num or "?")}
+        w = self._refs.get(key)
+        if clean and (not w or lap_ms < w["ms"]):
             self._refs[key] = {"ms": lap_ms, "cols": lap, "sectors": sectors,
-                               "session": SESSION_ES.get(st.session_type, "")}
+                               "session": "tu mejor del fin de semana (%s)"
+                               % SESSION_ES.get(st.session_type, "")}
+
+    @staticmethod
+    def _this_session(st):
+        """Laps, best sectors and ideal lap of the current session."""
+        laps = st.session_laps
+        if not laps:
+            return None
+        sec = lambda ms: num_es(ms / 1000.0, 3) if ms else None
+        good = [x for x in laps if x["valid"] and not x["out_lap"]]
+        best = min(good, key=lambda x: x["ms"]) if good else None
+        with_s = [x["sectors"] for x in good if x["sectors"] and all(x["sectors"])]
+        bs = [min(x[i] for x in with_s) for i in range(3)] if with_s else None
+        return {k: v for k, v in {
+            "laps": [{"lap": x["lap"], "time": laptime_es(x["ms"]),
+                      "valid": x["valid"], "out_lap": x["out_lap"] or None,
+                      "sectors": [sec(v) for v in x["sectors"]]
+                      if x["sectors"] else None} for x in laps[-10:]],
+            "best_lap": laptime_es(best["ms"]) if best else None,
+            "best_lap_sectors": [sec(v) for v in best["sectors"]]
+            if best and best["sectors"] else None,
+            "best_sectors": [sec(v) for v in bs] if bs else None,
+            "ideal_lap": laptime_es(sum(bs)) if bs else None,
+        }.items() if v is not None}
 
     def _lap_call(self, sender, st, an, lap_ms, ref_ms):
         if st.session_type in RACE_SESSIONS or not an.get("valid") \
@@ -616,7 +679,7 @@ class RaceEngineer:
         if race:
             self._pit_window_rules(say, st, r)
         else:
-            self._session_rules(say, st, p, r, lap, on_track, speed, now)
+            self._session_rules(say, st, p, r, lap, on_track, speed, now, sender)
 
     def _on_lap(self, sender, st, p, r, race, names, now):
         say = lambda text, prio=1: self._say(sender, text, prio)
@@ -835,7 +898,7 @@ class RaceEngineer:
             st.pit_said.add("last")
             say("Última vuelta de la ventana. Si paramos, es ahora: box, box.", 3)
 
-    def _session_rules(self, say, st, p, r, lap, on_track, speed, now):
+    def _session_rules(self, say, st, p, r, lap, on_track, speed, now, sender):
         """Practice / qualifying: invalid laps, sector deltas, time left,
         tyres ready after the out lap."""
         if r.get("lap_invalid") and not p.get("lap_invalid") and \
@@ -876,6 +939,14 @@ class RaceEngineer:
 
         self._outlap_coach(say, st, r, on_track, speed)
 
+        # back in the garage after a run: Claude debriefs it
+        if r.get("driver_status") == 0 and p.get("driver_status") not in (0, None) \
+                and any(not x["out_lap"] for x in st.session_laps) \
+                and now - st.listened < 10 and brain.llm_ready() \
+                and self._ready(st, "debrief", 90, now):
+            threading.Thread(target=self._debrief, args=(sender, st),
+                             daemon=True).start()
+
     OUTLAP_CP = (0.3, 0.65, 0.9)
 
     def _outlap_coach(self, say, st, r, on_track, speed):
@@ -885,7 +956,8 @@ class RaceEngineer:
             st.coach_cp = set()
             return
         L, d = r.get("track_length") or 0, r.get("lap_distance")
-        if not st.pit_lap or not L or d is None or speed < 60:
+        out = st.pit_lap or r.get("driver_status") == 3
+        if not out or not L or d is None or speed < 60:
             return
         frac = (L + d) / L if d < 0 else d / L
         cp = next((i for i, x in enumerate(self.OUTLAP_CP)
@@ -1105,6 +1177,20 @@ class RaceEngineer:
         threading.Thread(target=self._brief, args=(sender, st),
                          daemon=True).start()
 
+    def _debrief(self, sender, st):
+        try:
+            text = brain.answer(
+                st.driver, self._context(st),
+                "(Mensaje automático, no del piloto.) Acaba de volver al "
+                "garaje. Debrief de esta salida con this_session y "
+                "last_lap_analysis: su mejor vuelta, la vuelta ideal si "
+                "la hay, dónde pierde más y qué cambiar en la próxima "
+                "salida. Máximo 3 frases.", st.qa, strategy=True)
+            if text:
+                self._say(sender, text, 1)
+        except brain.BrainError as e:
+            print("[engineer] debrief: %s" % e)
+
     def _brief(self, sender, st):
         try:
             text = brain.answer(
@@ -1140,6 +1226,7 @@ class RaceEngineer:
                      "ers_pct": r.get("ers_pct"), "ers_mode": r.get("ers_mode"),
                      "drs": live.get("drs")},
             "on_track": age < 3, "telemetry_age_s": int(age),
+            "car_state": car_state(r),
             "session": r.get("session_type"), "track": live.get("track_name"),
             "speed_kmh": live.get("speed"), "gear": live.get("gear"),
             "now": r,
@@ -1151,6 +1238,7 @@ class RaceEngineer:
                         for x in st.laps[-15:]],
             "recent_radio_calls": [m[3] for m in list(self._msgs)[-6:]],
             "weekend": self._weekend_view(st),
+            "this_session": self._this_session(st),
             "last_lap_analysis": st.last_analysis,
         } if st.live else {
             "telemetry": "ninguna todavía: el piloto está en los menús del "

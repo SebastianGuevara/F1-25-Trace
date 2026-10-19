@@ -606,6 +606,7 @@ class Recorder(threading.Thread):
             "pit_window": sl.get("pit_window"),
             "current_lap_ms": cl.current_lap_ms,
             "lap_distance": round(cl.lap_distance, 1),
+            "driver_status": cl.driver_status,
             "track_length": self.track_length,
             "s1_ms": cl.s1_ms, "s2_ms": cl.s2_ms,
             "lap_invalid": bool(cl.invalid),
@@ -756,14 +757,33 @@ class Recorder(threading.Thread):
             "role": "player", "lap_num": buf.lap_num,
             "lap_time_ms": lap_time_ms, "valid": not buf.invalid,
         })
+        track_id = self.session_info["track_id"] if self.session_info else None
         try:
             self.engineer.lap_done(
                 self._sender_key(), cols, lap_time_ms, not buf.invalid,
-                [s1, s2, s3] if s1 and s2 else None,
-                self.session_info["track_id"] if self.session_info else None,
-                self.track_length)
+                [s1, s2, s3] if s1 and s2 else None, track_id,
+                self.track_length, buf.lap_num,
+                lambda: self._best_lap(track_id, driver_name, lap_time_ms))
         except Exception as e:      # coaching must never stop recording
             print("[engineer] lap_done: %r" % e)
+
+
+    def _best_lap(self, track_id, driver_name, faster_than):
+        """This driver's best valid lap ever at this track (earlier
+        sessions included), as the engineer's reference when it has none
+        in memory (first lap of a weekend, or after a restart)."""
+        row = self.con.execute(
+            "SELECT l.lap_time_ms, l.s1_ms, l.s2_ms, l.s3_ms, l.samples,"
+            " l.created_at FROM laps l JOIN sessions s ON s.id = l.session_id"
+            " WHERE l.car_role = 'player' AND l.valid = 1 AND s.track_id = ?"
+            " AND l.driver_name = ? AND l.lap_time_ms != ?"
+            " ORDER BY l.lap_time_ms LIMIT 1",
+            (track_id, driver_name, faster_than)).fetchone()
+        if not row:
+            return None
+        return {"ms": row[0], "sectors": list(row[1:4]) if row[1] else None,
+                "cols": db.unpack_samples(row[4]),
+                "session": "histórica en este circuito, %s" % (row[5] or "")[:10]}
 
 
 def _fmt_time(ms):
