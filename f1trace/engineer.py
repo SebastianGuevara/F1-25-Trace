@@ -14,6 +14,7 @@ root (see `load_env`); they never leave the server.
 import collections
 import json
 import os
+import random
 import re
 import threading
 import time
@@ -78,6 +79,17 @@ def _stage(session_type):
     """1 practice, 2 qualifying / shootout, 3 race."""
     return 3 if session_type in RACE_SESSIONS else 2 if session_type >= 5 else 1
 
+# Said while a slow answer is on its way: right away for analysis
+# questions (strategy model, a few seconds), after FILLER_AFTER_S for the
+# rest. Their audio is cached, so they cost voice credit only once.
+FILLER_DEEP = ("Copiado, miro los datos y te digo.",
+               "Recibido, déjame analizarlo un momento.",
+               "Vale, reviso la telemetría y vuelvo contigo.",
+               "Entendido, lo miro y te cuento.")
+FILLER_SLOW = ("Un segundo, lo miro.", "Déjame comprobarlo.",
+               "Dame un momento.", "Lo reviso, un segundo.")
+FILLER_AFTER_S = 2.0
+
 # Rough list prices for the usage estimate (USD). Claude per million
 # tokens (input, output) by model family; speech-to-text per minute.
 # ElevenLabs is counted in characters/credits, its price depends on plan.
@@ -128,6 +140,10 @@ def laptime_es(ms):
 
 def num_es(x, nd=1):
     return ("%.*f" % (nd, x)).replace(".", ",")
+
+
+class _Cached(Exception):
+    """A phrase whose audio we already have: skip the TTS request."""
 
 
 class _Sender:
@@ -222,6 +238,8 @@ class RaceEngineer:
         except ValueError:
             self.el_speed = 0.95
         self.last_tts_error = None
+        self._phrase_audio = {}    # filler text -> mp3, synthesised once
+        self._last_filler = None
 
     # -------------------------------------------------------- usage
 
@@ -509,8 +527,10 @@ class RaceEngineer:
         if not owner:
             ev.wait(15)
             return self._audio.get(mid)
-        data = None
+        data = self._phrase_audio.get(text)
         try:
+            if data:
+                raise _Cached
             req = urllib.request.Request(
                 "https://api.elevenlabs.io/v1/text-to-speech/%s"
                 "?output_format=mp3_44100_64" % self.el_voice,
@@ -528,6 +548,10 @@ class RaceEngineer:
                 data = resp.read()
             self.last_tts_error = None
             self._add_usage("tts", chars=len(text))
+            if text in FILLER_DEEP + FILLER_SLOW:
+                self._phrase_audio[text] = data
+        except _Cached:
+            pass
         except urllib.error.HTTPError as e:
             self.last_tts_error = "ElevenLabs HTTP %d: %s" % (
                 e.code, e.read()[:200].decode("utf-8", "replace"))
@@ -1477,8 +1501,16 @@ class RaceEngineer:
                 # voice each sentence as soon as it's written
                 ctx = self._context(st)
                 deep = brain.wants_analysis(q)
+                first = threading.Event()
+                if deep:
+                    self._filler(sender, FILLER_DEEP)
+                else:
+                    threading.Thread(target=self._filler_if_slow,
+                                     args=(sender, first), daemon=True).start()
                 for chunk in brain.answer_stream(st.driver, ctx, q, st.qa,
                                                  strategy=deep):
+                    with self._lock:
+                        first.set()
                     if not parts:
                         print("[engineer] tiempos: voz->texto %.1fs, "
                               "primera frase %.1fs" % (t_stt, time.time() - t0))
@@ -1503,6 +1535,20 @@ class RaceEngineer:
         finally:
             st.asking = False
             st.ask_lock.release()
+
+    def _filler(self, sender, phrases):
+        """'Copiado, lo miro' while the answer is being written."""
+        text = random.choice([x for x in phrases if x != self._last_filler])
+        self._last_filler = text
+        self._say(sender, text, 3, reply=True)
+
+    def _filler_if_slow(self, sender, first):
+        if first.wait(FILLER_AFTER_S):
+            return
+        with self._lock:          # the answer may have just arrived
+            if first.is_set():
+                return
+        self._filler(sender, FILLER_SLOW)
 
     def _tyre_rules(self, say, st, r, lap, on_track, speed, now):
         ty = r.get("tyres") or {}
