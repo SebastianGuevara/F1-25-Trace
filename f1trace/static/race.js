@@ -440,11 +440,30 @@ function tone(ctx, t, f, dur, vol) {
 }
 /* 1 = incoming call, 2 = "I'm listening" chirp, 3 = end of call.
    Returns how long it lasts (s). */
+// the F1 radio "open" sound; its audible part is 0.22..0.70 s of the file
+let radioOnBuf = null;
+function loadRadioOn() {
+  if (radioOnBuf) return;
+  radioOnBuf = "loading";
+  fetch("radio-on.mp3").then((r) => r.arrayBuffer())
+    .then((b) => fxCtx().decodeAudioData(b))
+    .then((buf) => { radioOnBuf = buf; })
+    .catch(() => { radioOnBuf = null; });
+}
 function beep(kind) {
   try {
     const ctx = fxCtx(), t = ctx.currentTime + 0.02;
     if (kind === 2) { tone(ctx, t, 880, 0.06, 0.2); tone(ctx, t + 0.075, 1320, 0.09, 0.2); return 0.18; }
     if (kind === 3) { squelch(ctx, t, 0.14, 0.12); return 0.14; }
+    if (radioOnBuf instanceof AudioBuffer) {
+      const src = ctx.createBufferSource(), g = ctx.createGain();
+      src.buffer = radioOnBuf;
+      g.gain.value = 1.4;
+      src.connect(g).connect(ctx.destination);
+      src.start(t, 0.2, 0.52);
+      return 0.52;
+    }
+    loadRadioOn();          // first call before it loaded: synthesised beep
     squelch(ctx, t, 0.08, 0.16);
     tone(ctx, t + 0.07, 1250, 0.075, 0.18);
     tone(ctx, t + 0.17, 1250, 0.075, 0.18);
@@ -573,6 +592,7 @@ $("rv-radio").addEventListener("click", () => {
   }
 });
 paintRadioBtn();
+loadRadioOn();
 setInterval(pollRadio, 250);
 // browsers keep audio locked until the first touch/click on the page
 addEventListener("pointerdown", unlockAudio);
