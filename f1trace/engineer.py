@@ -207,6 +207,7 @@ class _Sender:
         self.coach_state = None   # what the last coaching call said
         self.lap_kind = None      # out / prep / push (current lap)
         self.traffic_said = {}    # (car idx, his lap) -> 1 heads-up, 2 close
+        self.go_lap = None        # lap on which we said "abre vuelta"
         self.push_ers = []        # % battery each push lap used
         self.fuel_burn = []       # kg each lap on track burned
         self.tyre_ref = {}        # kind -> [(front, rear) median per push lap]
@@ -1062,8 +1063,16 @@ class RaceEngineer:
     def _traffic_call(self, say, st, r, on_track):
         """Out / prep / in lap: a car on a flying lap coming up behind.
         A heads-up at ~8 s and a 'let him by' when he's ~3 s back, once
-        per car and lap of his."""
-        slow = st.lap_kind in ("out", "prep") or r.get("driver_status") in (2, 3)
+        per car and lap of his. Never while the player is on a flying lap
+        of his own: then the car behind is just a rival."""
+        status, lap = r.get("driver_status"), r.get("lap_num") or 0
+        # pushing: the game says flying lap, or we told him to open one
+        # (the end of that lap and the next), and he isn't off the pace
+        pushing = st.lap_kind != "prep" and status != 2 and (
+            (status == 1 and not st.pit_lap)
+            or (st.go_lap is not None and lap in (st.go_lap, st.go_lap + 1)))
+        slow = not pushing and (st.lap_kind in ("out", "prep")
+                                or status in (2, 3))
         if not on_track or not slow:
             return
         for c in r.get("traffic") or []:
@@ -1152,8 +1161,11 @@ class RaceEngineer:
                     "vuelta." % (num_es(fuel[1]), num_es(fuel[2])), 2)
             return
         if last:
-            return say(self._go_call(st, r, frac, front, rear, cold_f, cold_r,
-                                     hot, ers), 2)
+            msg = self._go_call(st, r, frac, front, rear, cold_f, cold_r,
+                                hot, ers)
+            if msg.startswith("Abre vuelta"):
+                st.go_lap = lap
+            return say(msg, 2)
         bits = []
         if cp == 0 and kind == "prep":
             bits.append("Vuelta de preparación.")
